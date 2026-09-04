@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./riskguard.db
+      - LLM_PROVIDER=openai
+      - LLM_API_KEY=${LLM_API_KEY:-}
+    volumes:
+      - ./backend:/app
+      - ml_models:/app/ml/models
+    working_dir: /app
+    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  ml_models:
