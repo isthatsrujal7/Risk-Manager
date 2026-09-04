@@ -79,7 +79,9 @@ def create_transaction(txn: TransactionCreate, db: Session = Depends(get_db)):
         location_city=txn.location_city,
         location_country=txn.location_country,
         timestamp=txn.timestamp or datetime.now(timezone.utc),
-        is_fraud=txn.is_fraud or False,
+        # Ground-truth labels are never accepted from live ingestion; the label
+        # is assigned later by investigation (human decision) or batch analysis.
+        is_fraud=False,
     )
     db.add(db_txn)
     db.commit()

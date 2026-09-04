@@ -12,10 +12,10 @@ services:
       - LLM_PROVIDER=openai
       - LLM_API_KEY=${LLM_API_KEY:-}
     volumes:
-      - ./backend:/app
-      - ml_models:/app/ml/models
-    working_dir: /app
-    command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+      - ./:/workspace
+    # The image CMD seeds the held-out demo stream on first boot when the DB
+    # is empty, then serves the API on :8000. The bind mount keeps model
+    # artifacts and code in sync with the host.
 
   frontend:
     build:
@@ -25,6 +25,3 @@ services:
       - "5173:80"
     depends_on:
       - backend
-
-volumes:
-  ml_models:

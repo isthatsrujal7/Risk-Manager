@@ -1,16 +1,19 @@
 import os
-import sys
 import json
+import shutil
 from datetime import datetime, timezone
 
 import pandas as pd
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-
 from sqlalchemy.orm import Session
 
 from app.models.models import Transaction, Review, RiskAssessment
+# Importing model_paths also bootstraps the repo root onto sys.path so ml.src is
+# importable no matter which directory the process runs from.
+from app.services import model_paths
 from app.services.model_paths import MODEL_DIR
+
+_CANDIDATE_DIR = os.path.join(MODEL_DIR, "_candidates")
 
 
 def _extract_human_labeled_data(db: Session) -> pd.DataFrame:
@@ -69,11 +72,15 @@ def _extract_human_labeled_data(db: Session) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def retrain_from_feedback(db: Session, n_synthetic=3000, fraud_rate=0.05):
-    """Retrain the fraud model combining synthetic data with real human-labeled
-    feedback. Saves a new versioned model and evaluation metrics. Returns a report."""
+def retrain_candidate_from_feedback(db: Session, n_synthetic=3000, fraud_rate=0.05):
+    """Train a NEW candidate model on synthetic data + human-labeled feedback.
+
+    This NEVER replaces the active model. The result is written to versioned
+    candidate artifacts plus a ledger entry with status "candidate". A risk team
+    member must call approve_candidate() to promote it. Returns a report.
+    """
     from ml.src.data_generator import generate_synthetic_data
-    from ml.src.model import FraudModel, train_and_evaluate
+    from ml.src.model import train_and_evaluate
 
     human_df = _extract_human_labeled_data(db)
 
@@ -98,56 +105,98 @@ def retrain_from_feedback(db: Session, n_synthetic=3000, fraud_rate=0.05):
     else:
         data = {"train": base_train, "val": base_val, "test": base_test}
 
-    results = train_and_evaluate(data, [])
+    # Train into a scratch dir so the ACTIVE fraud_model.joblib /
+    # feature_pipeline.joblib are never touched by a candidate run.
+    os.makedirs(_CANDIDATE_DIR, exist_ok=True)
+    results = train_and_evaluate(data, [], models_dir=_CANDIDATE_DIR)
 
     best = results["best_model"]
-    new_version = f"v2-feedback-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    new_version = f"fb-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
 
-    # train_and_evaluate saves with fixed v1 names; re-save under a versioned name
-    _version_artifacts(best, new_version, results)
+    versioned_model = os.path.join(MODEL_DIR, f"fraud_model_{new_version}.joblib")
+    versioned_pipeline = os.path.join(MODEL_DIR, f"feature_pipeline_{new_version}.joblib")
+    shutil.copy(os.path.join(_CANDIDATE_DIR, "fraud_model.joblib"), versioned_model)
+    shutil.copy(os.path.join(_CANDIDATE_DIR, "feature_pipeline.joblib"), versioned_pipeline)
+
+    test_metrics = results["models"][best]["test"]
+    _write_ledger({
+        "version": new_version,
+        "best_model": best,
+        "f1": test_metrics["f1"],
+        "precision": test_metrics["precision"],
+        "recall": test_metrics["recall"],
+        "false_positives": test_metrics["false_positives"],
+        "false_negatives": test_metrics["false_negatives"],
+        "human_labeled_rows": int(len(human_df)),
+        "status": "candidate",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
 
     return {
         "human_labeled_rows": int(len(human_df)),
         "synthetic_rows": n_synthetic,
         "training_total_rows": int(len(data["train"])),
-        "best_model": best,
         "new_model_version": new_version,
-        "test_metrics": results["models"][best]["test"],
+        "test_metrics": test_metrics,
+        "status": "candidate",
+        "note": "Candidate trained and stored. The active model is UNCHANGED. Approve to promote.",
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
-def _version_artifacts(best_model_name, version, results):
-    """Copy the freshly saved v1 artifacts to a versioned filename + write a
-    feedback-loop ledger entry."""
-    import shutil
-    os.makedirs(MODEL_DIR, exist_ok=True)
+def approve_candidate(version: str) -> dict:
+    """Promote a candidate model to the active fraud_model.joblib.
 
-    src_model = os.path.join(MODEL_DIR, "fraud_model.joblib")
-    src_pipeline = os.path.join(MODEL_DIR, "feature_pipeline.joblib")
-
+    An operator explicitly approves a candidate version (e.g. after reviewing
+    its held-out metrics in the UI). Only then are the active artifact files
+    replaced and the in-process model cache invalidated.
+    """
     versioned_model = os.path.join(MODEL_DIR, f"fraud_model_{version}.joblib")
     versioned_pipeline = os.path.join(MODEL_DIR, f"feature_pipeline_{version}.joblib")
-    if os.path.exists(src_model):
-        shutil.copy(src_model, versioned_model)
-    if os.path.exists(src_pipeline):
-        shutil.copy(src_pipeline, versioned_pipeline)
+    if not os.path.exists(versioned_model) or not os.path.exists(versioned_pipeline):
+        return {"ok": False, "error": f"Candidate version '{version}' not found."}
 
+    shutil.copy(versioned_model, os.path.join(MODEL_DIR, "fraud_model.joblib"))
+    shutil.copy(versioned_pipeline, os.path.join(MODEL_DIR, "feature_pipeline.joblib"))
+    # Refresh the dashboard's reported evaluation metrics from this version.
+    for name in ("evaluation_metrics.json", "honest_metrics.json"):
+        cand = os.path.join(_CANDIDATE_DIR, name)
+        if os.path.exists(cand):
+            shutil.copy(cand, os.path.join(MODEL_DIR, name))
+
+    _mark_ledger_approved(version)
+
+    # Invalidate the in-process model cache so the next scored transaction
+    # reloads the newly approved artifacts.
+    try:
+        from app.services import risk_scoring
+        risk_scoring.reload_model_cache()
+    except Exception:
+        pass
+
+    return {"ok": True, "approved_version": version}
+
+
+def _write_ledger(entry: dict):
     ledger_path = os.path.join(MODEL_DIR, "feedback_loop_history.json")
     history = []
     if os.path.exists(ledger_path):
         with open(ledger_path) as f:
             history = json.load(f)
+    history.append(entry)
+    with open(ledger_path, "w") as f:
+        json.dump(history, f, indent=2)
 
-    history.append({
-        "version": version,
-        "best_model": best_model_name,
-        "f1": results["models"][best_model_name]["test"]["f1"],
-        "precision": results["models"][best_model_name]["test"]["precision"],
-        "recall": results["models"][best_model_name]["test"]["recall"],
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    })
 
+def _mark_ledger_approved(version: str):
+    ledger_path = os.path.join(MODEL_DIR, "feedback_loop_history.json")
+    if not os.path.exists(ledger_path):
+        return
+    with open(ledger_path) as f:
+        history = json.load(f)
+    for entry in history:
+        if entry.get("version") == version:
+            entry["status"] = "approved"
     with open(ledger_path, "w") as f:
         json.dump(history, f, indent=2)
 
@@ -158,6 +207,13 @@ def get_feedback_loop_status(db: Session):
     if os.path.exists(ledger_path):
         with open(ledger_path) as f:
             history = json.load(f)
+
+    # Candidate versions currently staged and awaiting approval.
+    pending_candidates = [
+        {"version": e["version"], "f1": e.get("f1"), "precision": e.get("precision"),
+         "recall": e.get("recall"), "created": e.get("timestamp")}
+        for e in history if e.get("status") == "candidate"
+    ]
 
     human_rows = len(_extract_human_labeled_data(db))
     reviews_total = db.query(Review).filter(Review.human_decision.isnot(None)).count()
@@ -181,6 +237,8 @@ def get_feedback_loop_status(db: Session):
         "false_positives": fp,
         "false_negatives": fn,
         "active_model_version": active_version,
+        "pending_candidates": pending_candidates,
         "retrain_history": history,
         "last_retrain": history[-1] if history else None,
+        "governance": "Retrained models are staged as candidates and require explicit approval before they become active.",
     }

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Float, Integer, DateTime, Text, Boolean, ForeignKey, JSON
+from sqlalchemy import Column, String, Float, Integer, DateTime, Text, Boolean, ForeignKey, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
@@ -83,6 +83,9 @@ class BehavioralProfile(Base):
 
 class RiskAssessment(Base):
     __tablename__ = "risk_assessments"
+    __table_args__ = (
+        UniqueConstraint("transaction_id", name="uq_risk_assessment_transaction"),
+    )
 
     assessment_id = Column(String, primary_key=True, default=lambda: gen_id("RA-"))
     transaction_id = Column(String, ForeignKey("transactions.transaction_id"), nullable=False)

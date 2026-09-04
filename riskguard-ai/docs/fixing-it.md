@@ -121,10 +121,121 @@ the first PAT had only read/API metadata. A user-level login can't be
 force-elevated from the command line.
 
 **Fix**: recreated the token with `Contents: Read and write` +
-`Metadata: Read` for the repository; push succeeded (`23a52bc` live on GitHub).
+`Metadata: Read` for the repository; push succeeded (`23a52bc` and `ae9bcaf`
+live on GitHub).
 
 **Security note**: the earlier token text was pasted into a chat session and
 was **revoked** after use; never leave tokens in shell history or chat logs.
+
+---
+
+## Incident 7 — External review: ML model silently not loading (path bug)
+
+**Symptom**: an evaluator running `cd backend && uvicorn app.main:app` got
+`ModuleNotFoundError: No module named 'ml.src'`. The backend never crashed — it
+silently fell back to the heuristic scorer, so every score looked "fine".
+
+**Root cause**: `risk_scoring.py` inserted `os.path.join(dirname, "..", "..")`
+into `sys.path`, which resolves to `backend/`, not the repo root — `ml.src`
+was unreachable whenever the process ran from `backend/` (uvicorn, pytest).
+A model "loaded" flag was already set by the fallback branch, masking the gap.
+
+**Fix**: repo-root bootstrap in `backend/app/__init__.py` and
+`app/services/model_paths.py` (PROJECT_ROOT injected into `sys.path`); the
+`ml.src` import now works from any working directory.
+
+**Guard**: regression test `TestMlImportPath` asserts `ml.src` is importable
+from the backend CWD and that the canonical model artifacts resolve to the
+repo root.
+
+---
+
+## Incident 8 — External review: two databases, empty dashboard (path bug)
+
+**Symptom**: seeding (run from repo root) wrote `riskguard.db` at the root,
+while the backend (running from `backend/`) read `backend/riskguard.db`.
+Dashboards got different data depending on who ran what.
+
+**Root cause**: relative `sqlite:///./riskguard.db` URLs resolve against the
+process CWD. Nothing anchored them.
+
+**Fix**: `backend/app/models/database.py` now resolves relative SQLite paths
+against the repo root (PROJECT_ROOT), and loads `.env` before the engine is
+created. Seed and live app share exactly one database file.
+
+**Guard**: tests run against an isolated DB via `tests/conftest.py`
+(`DATABASE_URL` redirected to a temp file) so the suite can never clobber the
+demo database.
+
+---
+
+## Incident 9 — External review: dashboard metrics were label-rigged
+
+**Symptom**: the UI claimed ~100% precision/recall/F1 on the seeded stream.
+
+**Root cause**: two compounding leaks. (1) `seed_database.py` shaped every
+`final_score` from the ground-truth `is_fraud` column instead of from the
+model, and it inserted the **oldest** 1000 transactions (training-period data
+the model had already seen). (2) `analytics_overview` recomputed
+precision/recall from the DB's own labels+predictions, so the demo literally
+graded its own homework.
+
+**Fix**: (1) seed now inserts the **held-out test window** (newest 20%,
+model never trained on it) and scores purely from the model plus a
+contamination-free behavioral baseline built exactly like live scoring.
+(2) `analytics/overview` reports classification quality from
+`evaluation_metrics.json` (with `metrics_source: "held-out test set"`), while
+operational counts stay as genuine DB facts.
+
+**Guard**: `TestAnalytics.test_overview_metrics_from_held_out_set` fails if
+`metrics_source` is absent; the seeded stream reproduces the model card
+numbers within rounding.
+
+---
+
+## Incident 10 — External review: behavioral baseline contaminated the scored event
+
+**Symptom**: a transaction was compared against a profile that included the
+transaction itself, and recency counters used wall-clock time.
+
+**Root cause**: `update_profile` queried *all* of a customer's transactions,
+including the very event being scored; velocity windows used
+`datetime.now()` instead of the event's timestamp.
+
+**Fix**: `update_profile` accepts `exclude_transaction_id` (scoring passes the
+transaction under evaluation) and `reference_ts` (event-time recency). After
+scoring, the new transaction is folded into the profile.
+
+**Guard**: the seed path exercises the exact same service semantics.
+
+---
+
+## Incident 11 — External review: inconsistent risk thresholds across layers
+
+**Symptom**: `.env.example` said 30/60/80 but the app used 25/60/90 and the
+cost engine used 60/90.
+
+**Fix**: HITL bands and risk tiers are now defined in exactly one place —
+`backend/app/risk_policy.py` (`RISK_BAND_AUTOPILOT_MAX=25`,
+`RISK_BAND_BLOCK_MIN=90`) — and consumed by scoring, cost decision, seed,
+`.env.example` and README.
+
+**Guard**: changing a band is a one-line config change; nothing hardcodes 25/90.
+
+---
+
+## Incident 12 — External review: duplicate assessments on re-score + unvalidated LLM output
+
+**Symptom**: re-scoring a transaction appended a second `RiskAssessment` row;
+LLM investigation output was parsed with raw `json.loads`.
+
+**Fix**: re-scoring reuses the existing `assessment_id` (one assessment per
+transaction, enforced by a DB unique constraint); `retrain_candidate_from_feedback`
++ `POST /api/feedback-loop/approve` make model replacement an explicit,
+human-gated action instead of an automatic overwrite.
+
+**Guard**: `TestRiskScoring.test_rescore_does_not_duplicate_assessment` asserts
+a single row *and* a stable `assessment_id` after two `/score` calls.
 
 ---
 

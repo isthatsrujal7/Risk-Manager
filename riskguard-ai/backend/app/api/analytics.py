@@ -78,28 +78,32 @@ def analytics_overview(db: Session = Depends(get_db)):
 
     actual_fraud = db.query(Transaction).filter(Transaction.is_fraud == True).count()
     actual_legit = db.query(Transaction).filter(Transaction.is_fraud == False).count()
-
     flagged = db.query(RiskAssessment).filter(RiskAssessment.ml_prediction == "suspicious").count()
 
-    fp = max(0, flagged - actual_fraud)
-    fn = max(0, actual_fraud - flagged)
-    tp = min(flagged, actual_fraud)
-    tn = max(0, actual_legit - fp)
-
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
-    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0
-    fnr = fn / (fn + tp) if (fn + tp) > 0 else 0
-
-    total_fp_cost = fp * FP_COST
-    total_fn_cost = fn * FN_COST
-
-    model_version = "v1.0"
+    # Classification quality is reported from the HELD-OUT TEST SET that the
+    # model never trained on (evaluation_metrics.json), never re-derived from
+    # the demo database. Comparing live predictions to ground-truth labels in
+    # this DB would overstate performance and is exactly the kind of leak the
+    # honest-evaluation pass was built to prevent.
+    metrics = {}
     if os.path.exists(EVAL_METRICS_PATH):
         with open(EVAL_METRICS_PATH) as f:
             metrics = json.load(f)
-            model_version = metrics.get("model_version", "v1.0")
+
+    model_version = metrics.get("model_version", "v1.0")
+    precision = metrics.get("precision", 0)
+    recall = metrics.get("recall", 0)
+    f1 = metrics.get("f1", 0)
+    fpr = metrics.get("false_positive_rate", 0)
+    fnr = metrics.get("false_negative_rate", 0)
+    tp = metrics.get("true_positives", 0)
+    tn = metrics.get("true_negatives", 0)
+    fp = metrics.get("false_positives", 0)
+    fn = metrics.get("false_negatives", 0)
+    test_samples = metrics.get("total_samples", 0)
+
+    total_fp_cost = fp * FP_COST
+    total_fn_cost = fn * FN_COST
 
     ai_auto = db.query(RiskAssessment).filter(RiskAssessment.risk_tier == "LOW").count()
     human_review = db.query(RiskAssessment).filter(RiskAssessment.risk_tier.in_(["MEDIUM", "HIGH"])).count()
@@ -121,6 +125,8 @@ def analytics_overview(db: Session = Depends(get_db)):
         "total_fp_cost": round(total_fp_cost, 2),
         "total_fn_cost": round(total_fn_cost, 2),
         "total_cost": round(total_fp_cost + total_fn_cost, 2),
+        "metrics_source": "held-out test set (model never trained on these rows)",
+        "test_samples": test_samples,
         "risk_distribution": {"LOW": low, "MEDIUM": medium, "HIGH": high, "CRITICAL": critical},
         "hitl_summary": {
             "ai_autopilot": ai_auto,

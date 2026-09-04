@@ -37,8 +37,19 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     else:
         df["is_unusual_amount"] = (df["amount"] > 50000).astype(int)
 
-    df["is_new_device"] = 0
-    df["is_new_city"] = 0
+    # Preserve caller-provided values (live serving computes these from the real
+    # behavioral profile) instead of silently zeroing them. Only default when the
+    # column is absent, so training and serving stay on the same feature space.
+    if "is_new_device" in df.columns:
+        df["is_new_device"] = df["is_new_device"].astype(int)
+    else:
+        df["is_new_device"] = 0
+
+    if "is_new_city" in df.columns:
+        df["is_new_city"] = df["is_new_city"].astype(int)
+    else:
+        df["is_new_city"] = 0
+
     df["is_high_amount"] = (df["amount"] > 100000).astype(int)
 
     return df

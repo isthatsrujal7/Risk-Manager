@@ -166,8 +166,14 @@ class FraudModel:
         self.model_version = data["model_version"]
 
 
-def train_and_evaluate(data_dict, feature_columns):
+def train_and_evaluate(data_dict, feature_columns, models_dir=None):
     from ml.src.feature_pipeline import FeaturePipeline
+
+    # Default keeps cwd-relative behaviour for the legacy training script; the
+    # feedback loop and any backend code MUST pass the absolute model dir.
+    if models_dir is None:
+        models_dir = os.path.join(os.getcwd(), "ml", "models")
+    os.makedirs(models_dir, exist_ok=True)
 
     pipeline = FeaturePipeline()
     X_train, cols = pipeline.fit_transform(data_dict["train"])
@@ -192,9 +198,8 @@ def train_and_evaluate(data_dict, feature_columns):
     best_model_name = max(results, key=lambda k: results[k]["test"]["f1"])
     best_model = models[best_model_name]
 
-    os.makedirs("ml/models", exist_ok=True)
-    pipeline.save("ml/models/feature_pipeline.joblib")
-    best_model.save("ml/models/fraud_model.joblib")
+    pipeline.save(os.path.join(models_dir, "feature_pipeline.joblib"))
+    best_model.save(os.path.join(models_dir, "fraud_model.joblib"))
 
     def _clean(obj):
         if isinstance(obj, dict):
@@ -214,7 +219,7 @@ def train_and_evaluate(data_dict, feature_columns):
     overall_metrics["all_model_results"] = {k: _clean(dict(v["test"])) for k, v in results.items()}
     overall_metrics["model_version"] = f"v1.0-{best_model_name}"
 
-    with open("ml/models/evaluation_metrics.json", "w") as f:
+    with open(os.path.join(models_dir, "evaluation_metrics.json"), "w") as f:
         json.dump(overall_metrics, f, indent=2)
 
     shap_contributions = best_model.get_shap_values(X_test, cols)
@@ -223,7 +228,7 @@ def train_and_evaluate(data_dict, feature_columns):
     honest = {}
     try:
         from ml.src.evaluate_honest import run_honest_evaluation
-        honest = run_honest_evaluation(data_dict, pipeline, best_model)
+        honest = run_honest_evaluation(data_dict, pipeline, best_model, output_dir=models_dir)
     except Exception as e:
         print(f"Honest evaluation skipped: {e}")
 

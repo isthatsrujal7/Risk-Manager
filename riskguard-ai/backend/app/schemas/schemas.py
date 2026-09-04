@@ -15,7 +15,6 @@ class TransactionCreate(BaseModel):
     location_city: Optional[str] = None
     location_country: str = "IN"
     timestamp: Optional[datetime] = None
-    is_fraud: Optional[bool] = False
 
 
 class TransactionResponse(BaseModel):
@@ -162,3 +161,37 @@ class AnalyticsOverview(BaseModel):
 
 class RiskScoreRequest(BaseModel):
     transaction_id: str
+
+
+class EvidenceItem(BaseModel):
+    type: str = ""
+    value: Any = None
+    source: str = ""
+    description: str = ""
+
+
+class RelatedActivityItem(BaseModel):
+    transaction_id: str = ""
+    amount: float = 0.0
+    timestamp: str = ""
+
+
+class InvestigationReport(BaseModel):
+    """Contract for LLM-generated investigation output.
+
+    The investigation agent returns a struct-validated report (or None, which
+    forces the deterministic path) instead of trusting a raw `json.loads` of
+    an LLM completion - malformed or hallucinated structures can no longer
+    reach the Investigation table.
+    """
+
+    summary: str = ""
+    evidence: List[EvidenceItem] = []
+    contributing_factors: List[str] = []
+    behavioral_anomalies: List[str] = []
+    related_activity: List[RelatedActivityItem] = []
+    uncertainty: str = ""
+    recommended_action: str = ""
+    explanation: str = ""
+    is_llm_generated: bool = False
+    agent_model_used: str = "deterministic"

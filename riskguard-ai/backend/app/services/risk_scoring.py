@@ -1,5 +1,4 @@
 import os
-import sys
 import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
@@ -9,8 +8,7 @@ from app.models.models import Transaction, RiskAssessment, BehavioralProfile
 from app.services.behavioral import BehavioralFingerprintService
 from app.services.cost_decision import cost_decision_dict
 from app.services import model_paths
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from app import risk_policy
 
 MODEL_VERSION = "v1.0-rf"
 _model = None
@@ -21,7 +19,19 @@ def _load_model():
     global _model, _pipeline
     if _model is not None:
         return
+    _load_model_from_disk()
 
+
+def reload_model_cache():
+    """Drop the in-process model/pipeline so the next call reloads from disk."""
+    global _model, _pipeline
+    _model = None
+    _pipeline = None
+    _load_model_from_disk()
+
+
+def _load_model_from_disk():
+    global _model, _pipeline
     try:
         from ml.src.model import FraudModel
         from ml.src.feature_pipeline import FeaturePipeline
@@ -51,28 +61,43 @@ class RiskScoringService:
     def score_transaction(self, transaction: Transaction) -> RiskAssessment:
         _load_model()
 
-        ml_score = self._compute_ml_score(transaction)
-
-        profile = self.behavioral_service.update_profile(transaction.customer_id)
-        behavioral_deviation = self.behavioral_service.calculate_deviation(transaction, profile)
+        # Build the behavioral baseline WITHOUT the transaction being scored
+        # (contamination fix) and measure recency windows against the event's own
+        # timestamp so re-scoring and backfills are deterministic.
+        baseline = self.behavioral_service.update_profile(
+            transaction.customer_id,
+            exclude_transaction_id=transaction.transaction_id,
+            reference_ts=transaction.timestamp,
+        )
+        ml_score = self._compute_ml_score(transaction, baseline)
+        behavioral_deviation = self.behavioral_service.calculate_deviation(transaction, baseline)
 
         final_score = 0.7 * ml_score + 0.3 * behavioral_deviation
         final_score = min(100, max(0, final_score))
 
-        risk_tier = self._get_risk_tier(final_score)
-        handling_user = self._get_handling_user(risk_tier)
-        needs_alert = final_score >= 90
+        risk_tier = risk_policy.risk_tier(final_score)
+        needs_alert = final_score >= risk_policy.BAND_BLOCK_MIN
 
-        top_signals = self._get_top_signals(transaction, ml_score, behavioral_deviation, profile)
-        feature_contributions = self._get_feature_contributions(transaction, profile)
+        top_signals = self._get_top_signals(transaction, ml_score, behavioral_deviation, baseline)
+        feature_contributions = self._get_feature_contributions(transaction, baseline)
 
         cost = cost_decision_dict(transaction.amount or 0, final_score)
         cost_action = cost["decision"]
         # Cost-aware decision refines the fixed-tier action but never overrides
-        # the mandatory HITL block band (score >= 90).
-        if final_score >= 90:
+        # the mandatory HITL block band (score >= BAND_BLOCK_MIN).
+        if final_score >= risk_policy.BAND_BLOCK_MIN:
             cost_action = "BLOCK"
         handling_user = self._get_handling_user(risk_tier)
+
+        # Re-scoring a transaction must not create duplicate assessments; reuse
+        # the existing assessment_id so investigations keep their reference.
+        existing = self.db.query(RiskAssessment).filter(
+            RiskAssessment.transaction_id == transaction.transaction_id
+        ).first()
+        reused_id = existing.assessment_id if existing else None
+        if existing:
+            self.db.delete(existing)
+            self.db.flush()
 
         assessment = RiskAssessment(
             transaction_id=transaction.transaction_id,
@@ -84,12 +109,14 @@ class RiskScoringService:
             risk_tier=risk_tier,
             recommended_action=cost_action,
             handling_user=handling_user,
-            hitl_band=self._get_hitl_band(final_score),
+            hitl_band=risk_policy.hitl_band(final_score),
             needs_alert=needs_alert,
             top_signals=top_signals,
             feature_contributions={**feature_contributions, "cost_decision": cost},
             model_version=MODEL_VERSION,
         )
+        if reused_id:
+            assessment.assessment_id = reused_id
 
         self.db.add(assessment)
         self.db.commit()
@@ -103,7 +130,7 @@ class RiskScoringService:
             "recommended_action": cost_action,
             "handled_by": handling_user,
             "needs_alert": needs_alert,
-            "hitl_band": self._get_hitl_band(final_score),
+            "hitl_band": risk_policy.hitl_band(final_score),
             "cost_decision": cost,
         })
 
@@ -112,12 +139,16 @@ class RiskScoringService:
         elif risk_tier == "LOW":
             self._log_audit(transaction.transaction_id, "auto_allowed", {
                 "handled_by": "ai",
-                "reason": "Low risk score below 25%, auto-processed without human review",
+                "reason": "Low risk score below autopilot ceiling, auto-processed without human review",
             })
-        elif risk_tier == "MEDIUM" or risk_tier == "HIGH":
+        elif risk_tier in ("MEDIUM", "HIGH"):
             self._send_for_human_review(transaction, assessment)
 
         self._broadcast_live(transaction, assessment)
+
+        # Fold the newly scored transaction into the profile now that it is no
+        # longer the event under evaluation.
+        self.behavioral_service.update_profile(transaction.customer_id)
 
         return assessment
 
@@ -142,15 +173,10 @@ class RiskScoringService:
             print(f"Live feed broadcast failed: {e}")
 
     def _get_hitl_band(self, score: float) -> str:
-        if score < 25:
-            return "AI_AUTOPILOT"
-        elif score < 90:
-            return "HUMAN_REVIEW"
-        else:
-            return "AI_MANAGED_BLOCK"
+        return risk_policy.hitl_band(score)
 
     def _raise_risk_alert(self, transaction: Transaction, assessment: RiskAssessment):
-        """Alert the human risk team for 90-100 scores while AI auto-blocks."""
+        """Alert the human risk team for block-band scores while AI auto-blocks."""
         from app.models.models import AuditLog
         alert = AuditLog(
             transaction_id=transaction.transaction_id,
@@ -169,7 +195,7 @@ class RiskScoringService:
         self.db.commit()
 
         self._log_audit(transaction.transaction_id, "ai_auto_held", {
-            "reason": "Score >= 90. AI blocked transaction and alerted risk team.",
+            "reason": f"Score >= {risk_policy.BAND_BLOCK_MIN}. AI blocked transaction and alerted risk team.",
         })
 
         try:
@@ -198,7 +224,7 @@ class RiskScoringService:
             print(f"Alert creation failed: {e}")
 
     def _send_for_human_review(self, transaction: Transaction, assessment: RiskAssessment):
-        """Queue 25-90 score transactions for human review."""
+        """Queue human-review-band transactions for human review."""
         from app.models.models import AuditLog
         queue_entry = AuditLog(
             transaction_id=transaction.transaction_id,
@@ -206,7 +232,7 @@ class RiskScoringService:
             event_data={
                 "final_risk_score": assessment.final_risk_score,
                 "risk_tier": assessment.risk_tier,
-                "why": "Score in 25-90 range. AI recommends action but human judgment required.",
+                "why": "Score in human-review band. AI recommends action but human judgment required.",
                 "ai_recommendation": assessment.recommended_action,
             },
             model_version=MODEL_VERSION,
@@ -216,11 +242,16 @@ class RiskScoringService:
 
         return assessment
 
-    def _compute_ml_score(self, transaction: Transaction) -> float:
+    def _compute_ml_score(self, transaction: Transaction, profile: BehavioralProfile = None) -> float:
         if _model is None or _pipeline is None:
             return self._heuristic_score(transaction)
 
         try:
+            avg_amt = profile.avg_transaction_amount if profile and profile.avg_transaction_amount else (transaction.amount or 1000)
+            std_amt = profile.std_transaction_amount if profile and profile.std_transaction_amount else (avg_amt * 0.4)
+            common_devices = set(profile.common_devices or []) if profile else set()
+            common_locations = set(profile.common_locations or []) if profile else set()
+
             row = pd.DataFrame([{
                 "transaction_id": transaction.transaction_id,
                 "customer_id": transaction.customer_id,
@@ -236,8 +267,12 @@ class RiskScoringService:
                 "timestamp": transaction.timestamp or datetime.now(timezone.utc),
                 "is_fraud": False,
                 "account_age_days": 180,
-                "customer_avg_amount": 5000,
-                "customer_std_amount": 2000,
+                "customer_avg_amount": avg_amt,
+                "customer_std_amount": std_amt,
+                # Real behavioral features instead of hardcoded false values, so
+                # serving uses the same feature space as training.
+                "is_new_device": int(transaction.device_id not in common_devices) if transaction.device_id else 0,
+                "is_new_city": int(transaction.location_city not in common_locations) if transaction.location_city else 0,
             }])
             X = _pipeline.transform(row)
             proba = _model.predict_proba(X)
@@ -273,16 +308,7 @@ class RiskScoringService:
         return min(100, score)
 
     def _get_risk_tier(self, score: float) -> str:
-        """Three-tier Human-in-the-Loop decision system.
-        - 0-25: LOW → AI handles automatically
-        - 25-90: MEDIUM/HIGH → Human review
-        - 90-100: CRITICAL → AI blocks + alerts human risk team
-        """
-        if score < 25:
-            return "LOW"
-        elif score < 90:
-            return "MEDIUM" if score < 60 else "HIGH"
-        return "CRITICAL"
+        return risk_policy.risk_tier(score)
 
     def _get_recommended_action(self, tier: str) -> str:
         actions = {"LOW": "ALLOW", "MEDIUM": "VERIFY", "HIGH": "REVIEW", "CRITICAL": "HOLD"}

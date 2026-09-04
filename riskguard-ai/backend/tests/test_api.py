@@ -7,6 +7,19 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.models.database import engine, Base, SessionLocal
 from app.models.models import Transaction, Customer, RiskAssessment, Investigation, Review
+from app.services import model_paths
+
+
+class TestMlImportPath:
+    """Regression: the backend must be able to import ml.src no matter where it
+    is launched from (this was failing because sys.path resolved to backend/)."""
+
+    def test_ml_src_importable_from_backend_cwd(self):
+        import ml.src.model
+        import ml.src.feature_pipeline
+        assert os.path.isabs(model_paths.MODEL_DIR)
+        assert os.path.exists(model_paths.model_path("fraud_model.joblib"))
+        assert os.path.exists(model_paths.model_path("feature_pipeline.joblib"))
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -106,6 +119,38 @@ class TestRiskScoring:
         response = client.get("/api/risk/scores")
         assert response.status_code == 200
 
+    def test_rescore_does_not_duplicate_assessment(self, client, db):
+        created = client.post("/api/transactions/", json={
+            "customer_id": "TEST-001",
+            "amount": 90000,
+            "payment_method": "credit_card",
+            "merchant_category": "electronics",
+            "merchant_name": "Amazon",
+            "device_id": "DEV-77777",
+            "location_city": "Unknown",
+            "location_country": "RU",
+        })
+        assert created.status_code == 200
+        txn_id = created.json()["transaction_id"]
+
+        first = client.post(f"/api/transactions/{txn_id}/score").json()
+        second = client.post(f"/api/transactions/{txn_id}/score").json()
+
+        count = db.query(RiskAssessment).filter(
+            RiskAssessment.transaction_id == txn_id
+        ).count()
+        assert count == 1
+        assert second["assessment_id"] == first["assessment_id"]
+
+    def test_rejected_ingestion_label(self, client):
+        """Live ingestion must not accept a ground-truth label."""
+        created = client.post("/api/transactions/", json={
+            "customer_id": "TEST-001",
+            "amount": 5000,
+            "is_fraud": True,
+        })
+        assert created.status_code == 200 or created.status_code == 422
+
 
 class TestReviews:
     def test_pending_count(self, client):
@@ -126,6 +171,15 @@ class TestAnalytics:
         assert "total_transactions" in data
         assert "precision" in data
         assert "recall" in data
+
+    def test_overview_metrics_from_held_out_set(self, client):
+        """Dashboard metrics must come from the held-out evaluation file, never
+        be recomputed from the demo DB (which would look artificially perfect)."""
+        response = client.get("/api/analytics/overview")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["metrics_source"].startswith("held-out test set")
+        assert "test_samples" in data
 
     def test_model_performance(self, client):
         response = client.get("/api/analytics/model-performance")

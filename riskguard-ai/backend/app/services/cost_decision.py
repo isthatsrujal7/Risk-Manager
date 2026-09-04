@@ -23,6 +23,8 @@ blocks or charges anything by itself.
 """
 from dataclasses import dataclass, asdict
 
+from app import risk_policy
+
 
 @dataclass
 class CostDecision:
@@ -73,11 +75,11 @@ def compute_cost_decision(
 
     if expected_saving > 0:
         # Intervening is cheaper than letting it through.
-        if risk_score >= 90:
-            # Preserve the HITL three-tier rule: scores >= 90 are auto-blocked.
+        if risk_score >= risk_policy.BAND_BLOCK_MIN:
+            # Preserve the HITL three-tier rule: block-band scores are auto-blocked.
             decision = "BLOCK"
-            reason = "Expected loss if allowed exceeds handling cost; high confidence fraud (score >= 90)."
-        elif risk_score >= 60:
+            reason = f"Expected loss if allowed exceeds handling cost; high confidence fraud (score >= {risk_policy.BAND_BLOCK_MIN:.0f})."
+        elif risk_score >= risk_policy.TIER_MEDIUM_MAX:
             decision = "REVIEW"
             reason = "Expected loss if allowed exceeds handling cost; send to human review."
         else:

@@ -48,8 +48,8 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard title="Transactions Analyzed" value={overview.total_transactions.toLocaleString()} color="blue" />
         <StatCard title="High Risk Cases" value={overview.high_risk_count} color="red" />
-        <StatCard title="Precision" value={`${(overview.precision * 100).toFixed(1)}%`} color="green" />
-        <StatCard title="Recall" value={`${(overview.recall * 100).toFixed(1)}%`} color="purple" />
+        <StatCard title="Precision (held-out test)" value={`${(overview.precision * 100).toFixed(1)}%`} color="green" />
+        <StatCard title="Recall (held-out test)" value={`${(overview.recall * 100).toFixed(1)}%`} color="purple" />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

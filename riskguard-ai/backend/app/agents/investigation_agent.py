@@ -234,7 +234,13 @@ class InvestigationAgent:
                 if response.status_code == 200:
                     result = response.json()
                     content = result["choices"][0]["message"]["content"]
-                    inv_report = json.loads(content)
+                    raw = json.loads(content)
+                    # Struct-validate the LLM's JSON before it can touch the
+                    # Investigation table. Invalid/malformed output falls back to
+                    # the deterministic investigation path.
+                    from app.schemas.schemas import InvestigationReport
+                    parsed = InvestigationReport.model_validate(raw)
+                    inv_report = parsed.model_dump()
                     inv_report["is_llm_generated"] = True
                     inv_report["agent_model_used"] = f"{provider}/{model}"
                     return inv_report

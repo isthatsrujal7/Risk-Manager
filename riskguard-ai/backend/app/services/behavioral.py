@@ -22,10 +22,24 @@ class BehavioralFingerprintService:
 
         return profile
 
-    def update_profile(self, customer_id: str) -> BehavioralProfile:
-        txns = self.db.query(Transaction).filter(
+    def update_profile(self, customer_id: str, exclude_transaction_id: str = None, reference_ts=None) -> BehavioralProfile:
+        """Recompute the customer's behavioral baseline from transaction history.
+
+        exclude_transaction_id: when scoring a transaction, pass its id so the
+            baseline never includes the exact event being scored (contamination
+            fix). Once scoring finishes, call update_profile() again (without the
+            exclusion) to fold the new transaction into the profile.
+        reference_ts: velocity/recency windows are measured relative to the
+            reference event time (the transaction being scored) instead of
+            wall-clock `datetime.now()`, so scores are deterministic and
+            backfill/seed data computes correctly.
+        """
+        query = self.db.query(Transaction).filter(
             Transaction.customer_id == customer_id
-        ).order_by(Transaction.timestamp.desc()).all()
+        )
+        if exclude_transaction_id:
+            query = query.filter(Transaction.transaction_id != exclude_transaction_id)
+        txns = query.order_by(Transaction.timestamp.desc()).all()
 
         if not txns:
             return self.get_or_create_profile(customer_id)
@@ -47,10 +61,15 @@ class BehavioralFingerprintService:
         total = len(txns)
         cat_probs = {k: v / total for k, v in categories.items()}
 
-        now = datetime.now(timezone.utc)
-        recent_5 = [t.amount for t in txns if t.timestamp and (now - t.timestamp.replace(tzinfo=timezone.utc)).total_seconds() < 300]
-        recent_15 = [t.amount for t in txns if t.timestamp and (now - t.timestamp.replace(tzinfo=timezone.utc)).total_seconds() < 900]
-        recent_60 = [t.amount for t in txns if t.timestamp and (now - t.timestamp.replace(tzinfo=timezone.utc)).total_seconds() < 3600]
+        ref = reference_ts or datetime.now(timezone.utc)
+        if getattr(ref, "tzinfo", None) is None:
+            ref = ref.replace(tzinfo=timezone.utc)
+        else:
+            ref = ref.astimezone(timezone.utc)
+
+        recent_5 = [t.amount for t in txns if t.timestamp and (ref - t.timestamp.replace(tzinfo=timezone.utc)).total_seconds() < 300]
+        recent_15 = [t.amount for t in txns if t.timestamp and (ref - t.timestamp.replace(tzinfo=timezone.utc)).total_seconds() < 900]
+        recent_60 = [t.amount for t in txns if t.timestamp and (ref - t.timestamp.replace(tzinfo=timezone.utc)).total_seconds() < 3600]
 
         hour_counts = {}
         for h in hours:

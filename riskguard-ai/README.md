@@ -38,19 +38,23 @@ by expected-loss economics — not by a fixed 0.5 threshold.**
 ## Honest metrics (do not cherry-pick)
 
 Generated reproducibly by `python scripts/train_model.py`, on a
-**chronological split** (train 70% → val 10% → test 20%, no shuffle):
+**chronological split** (train 70% → val 10% → test 20%, no shuffle; the demo
+database then seeds the *same held-out test window* the model never trained on):
 
 | Operating point | Precision (95% CI) | Recall (95% CI) | FP | FN | Decision cost |
 |---|---|---|---|---|---|
-| Fixed threshold 0.5 | 100.0% | 74.5% | 0 | 13 | ₹6,500 |
-| **Cost-optimal (t≈0.14)** | 62.3% (50.0–73.4%) | 84.3% (73.6–93.0%) | 26 | 8 | **₹5,300** |
+| Fixed threshold 0.5 | 97.4% | 73.1% | 1 | 14 | ₹7,050 |
+| **Cost-optimal (t≈0.17)** | 71.2% (60.0–95%) | 90.4% (82.0–98.1%) | ~15 | ~5 | **₹3,450** |
 
-The synthetic generator intentionally includes 3% *silent mule* fraud that
-mimics the customer's own pattern (86% recall is the honest floor — any claim
-of 100% recall on this data is un-auditable). Leakage audit: **0** train/test
-ID overlap. Full details: [`docs/model-card.md`](docs/model-card.md).
+Every number includes the false-positive economics: ₹50 per FP (₹25 review
+labor + ₹25 CX/friction) and ₹500 per missed chargeback. The cost-optimal point
+trades precision for recall because a missed chargeback is 10× more expensive
+than an extra manual review. Leakage audit: **0** train/test ID overlap; the 3
+fraud behaviours (opportunistic / sophisticated / silent-mule) create genuine
+overlap with legitimate novelty, so the model can't claim un-auditable
+perfection. Full details: [`docs/model-card.md`](docs/model-card.md).
 
-## Risk tiers (HITL bands, hard-coded)
+## Risk tiers (HITL bands — single source of truth in `backend/app/risk_policy.py`)
 
 | Score | HITL band | Action |
 |---|---|---|
@@ -65,8 +69,9 @@ riskguard-ai/
 ├── backend/                  # Python FastAPI backend
 │   ├── app/
 │   │   ├── api/              # REST endpoints (transactions, risk, spikes, feedback…)
-│   │   ├── models/           # SQLAlchemy ORM
+│   │   ├── models/           # SQLAlchemy ORM + database path anchoring
 │   │   ├── schemas/          # Pydantic schemas
+│   │   ├── risk_policy.py    # single source of truth for HITL bands/tiers
 │   │   ├── services/         # cost_decision, risk_scoring, behavioral, feedback_loop, model_paths
 │   │   ├── agents/           # grounded AI investigation agent
 │   │   └── risk/             # spike detection (time-anchored z-score)
@@ -75,9 +80,10 @@ riskguard-ai/
 │   ├── src/                  # data_generator (realistic overlap), feature_pipeline, model, evaluate_honest
 │   ├── models/               # trained artifacts + honest_metrics.json + evaluation_metrics.json
 │   └── evaluation/           # charts/notebooks
-├── frontend/                 # React + TypeScript + Tailwind + Recharts
-├── scripts/                  # train_model.py, seed_database.py
+├── frontend/                 # React + TypeScript + Tailwind + Recharts (+ Dockerfile)
+├── scripts/                  # train_model.py, seed_database.py, docker_entrypoint.py
 ├── docs/                     # model-card, architecture, demo-script, fixing-it (failure recovery)
+├── Dockerfile.backend        # backend image (seeds empty DB on first boot)
 └── docker-compose.yml        # one-command stack
 ```
 
@@ -86,7 +92,15 @@ riskguard-ai/
 ```bash
 # 1. Train + honest-evaluate the model, then seed the demo database
 python scripts/train_model.py && python scripts/seed_database.py
+```
 
+> The demo database is written once, at the **repo root** as `riskguard.db` —
+> the backend resolves relative `DATABASE_URL` values against the repo root so
+> seeds and the live app always share one database, whichever directory they run
+> from. Seeding stores the **held-out test window** of the stream, so the
+> numbers you see in the UI are the numbers in the model card.
+
+```bash
 # 2. Start backend (port 8000)
 cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
@@ -96,7 +110,14 @@ cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 cd frontend && npm install && npm run dev
 ```
 
-Open <http://localhost:5173>. Or run the whole stack with `docker-compose up`.
+Open <http://localhost:5173>.
+
+**Docker (one command):**
+```bash
+docker compose up --build
+# backend on :8000 (auto-seeds the held-out demo stream if the DB is empty),
+# frontend on :5173 (nginx with /api proxied to the backend)
+```
 
 > Deliberate realism: `*.joblib` models and `*.db` are git-ignored; regenerate
 > with the two commands above. `honest_metrics.json` regenerates with every
@@ -112,7 +133,8 @@ Open <http://localhost:5173>. Or run the whole stack with `docker-compose up`.
 | `GET /api/analytics/overview` | Dashboard + expected-loss savings across the book |
 | `GET /api/analytics/model-performance` | P/R/F1 + **honest_evaluation** (leakage, CIs, cost point) |
 | `GET/POST /api/reviews/` | Human review + feedback labels |
-| `POST /api/feedback-loop/retrain` | Retrain a model version on human labels |
+| `POST /api/feedback-loop/retrain` | Stage a **candidate** model on human labels (active model unchanged) |
+| `POST /api/feedback-loop/approve` | Explicitly promote an approved candidate to the active model |
 | `GET /api/spikes/detect` | Time-anchored fraud spike detection |
 
 ## Documentation
@@ -131,6 +153,8 @@ LLM_API_KEY=
 LLM_MODEL=gpt-4
 FP_COST_PER_INCIDENT=50.0    # ₹25 review labor + ₹25 CX friction
 FN_COST_PER_INCIDENT=500.0   # missed chargeback
+RISK_BAND_AUTOPILOT_MAX=25   # HITL band ceilings (risk_policy.py)
+RISK_BAND_BLOCK_MIN=90       # HITL band floor for AI_MANAGED_BLOCK
 ```
 
 ## License

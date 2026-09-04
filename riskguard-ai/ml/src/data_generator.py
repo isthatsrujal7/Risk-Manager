@@ -63,26 +63,33 @@ def generate_synthetic_data(n_customers=200, n_transactions=5000, fraud_rate=0.0
             # occasionally buy big. Some of these look indistinguishable from
             # fraud (midnight hotel booking on a new device) - these are the
             # false positives every reviewer has to eat, and where FP cost lives.
-            if random.random() < 0.03:
+            if random.random() < 0.05:
                 novelty = random.random()
                 if novelty < 0.30:
                     amt = cust["avg_amount"] * np.random.uniform(1.5, 2.5)
                     device = f"DEV-{random.randint(10000, 99999)}"
+                    city = random.choice(["Unknown", "Mumbai", "Bangalore"])
                 elif novelty < 0.55:
+                    # International trip: new city/country on the preferred device
                     city = random.choice(["Unknown", "Foreign", "Nairobi", "Moscow", "Lagos"])
                     cat = random.choice(["travel", "electronics"])
+                    device = random.choice(cust["preferred_devices"])
                 elif novelty < 0.80:
                     hour = random.choice([1, 2, 3, 4, 5, 23])
                     device = f"DEV-{random.randint(10000, 99999)}"
+                    city = random.choice(cust["preferred_cities"])
                 else:
                     amt = cust["avg_amount"] * np.random.uniform(2.5, 4.0)
                     hour = random.choice([1, 2, 3, 4, 5, 23])
+                    city = random.choice(["Unknown", "Mumbai", "Delhi", "Bangalore"])
         elif fraud_style == "opportunistic":
             amt = cust["avg_amount"] * np.random.uniform(3, 15)
             hour = random.choice([1, 2, 3, 4, 5, 23])
             cat = random.choice(["electronics", "travel", "utilities"])
-            device = f"DEV-{random.randint(10000, 99999)}"
-            city = random.choice(["Unknown", "Foreign", "Nairobi", "Moscow", "Lagos"])
+            # Usually a fresh/foreign footprint, but not always - occasionally
+            # the carder is working from the customer's known device/city.
+            device = f"DEV-{random.randint(10000, 99999)}" if random.random() < 0.78 else random.choice(cust["preferred_devices"])
+            city = random.choice(["Unknown", "Foreign", "Nairobi", "Moscow", "Lagos"]) if random.random() < 0.8 else random.choice(cust["preferred_cities"])
         elif fraud_style == "sophisticated":
             amt = cust["avg_amount"] * np.random.uniform(1.5, 3.5)
             hour = max(0, min(23, int(np.random.normal(cust["typical_hour"], 4))))
@@ -141,6 +148,10 @@ def generate_synthetic_data(n_customers=200, n_transactions=5000, fraud_rate=0.0
             "account_age_days": cust["account_age_days"],
             "customer_avg_amount": cust["avg_amount"],
             "customer_std_amount": cust["std_amount"],
+            # Served at inference time from the customer's behavioral profile;
+            # emitted here so training sees the same semantics as live scoring.
+            "is_new_device": int(device not in cust["preferred_devices"]),
+            "is_new_city": int(city not in cust["preferred_cities"]),
         })
 
     df = pd.DataFrame(rows)

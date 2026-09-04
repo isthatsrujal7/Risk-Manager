@@ -34,12 +34,14 @@ export default function ModelAnalytics() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">Model Analytics</h1>
 
+      <p className="text-sm text-gray-500 mt-1">All headline metrics are measured on the {overview?.test_samples || 'held-out'} transactions of the chronological test set — a stream this model never trained on.</p>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <MetricCard title="Precision" value={`${((overview?.precision || 0) * 100).toFixed(1)}%`} />
-        <MetricCard title="Recall" value={`${((overview?.recall || 0) * 100).toFixed(1)}%`} />
-        <MetricCard title="F1 Score" value={`${((overview?.f1_score || 0) * 100).toFixed(1)}%`} />
-        <MetricCard title="FPR" value={`${((overview?.false_positive_rate || 0) * 100).toFixed(2)}%`} />
-        <MetricCard title="FNR" value={`${((overview?.false_negative_rate || 0) * 100).toFixed(2)}%`} />
+        <MetricCard title="Precision (held-out)" value={`${((overview?.precision || 0) * 100).toFixed(1)}%`} />
+        <MetricCard title="Recall (held-out)" value={`${((overview?.recall || 0) * 100).toFixed(1)}%`} />
+        <MetricCard title="F1 Score (held-out)" value={`${((overview?.f1_score || 0) * 100).toFixed(1)}%`} />
+        <MetricCard title="FPR (held-out)" value={`${((overview?.false_positive_rate || 0) * 100).toFixed(2)}%`} />
+        <MetricCard title="FNR (held-out)" value={`${((overview?.false_negative_rate || 0) * 100).toFixed(2)}%`} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

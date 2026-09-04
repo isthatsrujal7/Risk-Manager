@@ -5,10 +5,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import random
 import numpy as np
+import pandas as pd
 from datetime import datetime, timezone
 
 from app.models.database import SessionLocal, engine, Base
 from app.models.models import Customer, Transaction, RiskAssessment, BehavioralProfile, Investigation, Review, AuditLog, Alert
+from app.services.behavioral import BehavioralFingerprintService
+from app.services import model_paths
+from app import risk_policy
 from ml.src.data_generator import generate_synthetic_data
 from ml.src.feature_pipeline import FeaturePipeline
 from ml.src.model import FraudModel
@@ -26,8 +30,8 @@ def seed_database():
     pipeline = FeaturePipeline()
     model = FraudModel()
 
-    model_path = "ml/models/fraud_model.joblib"
-    pipeline_path = "ml/models/feature_pipeline.joblib"
+    model_path = model_paths.model_path("fraud_model.joblib")
+    pipeline_path = model_paths.model_path("feature_pipeline.joblib")
 
     if os.path.exists(model_path) and os.path.exists(pipeline_path):
         model.load(model_path)
@@ -42,6 +46,7 @@ def seed_database():
         print(f"Trained and loaded best model: {results['best_model']}")
 
     db = SessionLocal()
+    behavioral = BehavioralFingerprintService(db)
     try:
         print("Seeding customers...")
         for _, row in data["customers"].iterrows():
@@ -55,9 +60,13 @@ def seed_database():
         db.commit()
 
         print("Seeding transactions and risk assessments...")
-        batch_df = data["full"].head(1000)
-        X_batch = pipeline.transform(batch_df)
-        proba = model.predict_proba(X_batch)
+        # Seed the chronological HELD-OUT TEST WINDOW (the newest 20% of the
+        # synthetic stream). The model never trained on these rows, so the demo
+        # dashboard reproduces the exact metrics claimed on the held-out test
+        # set instead of showing training-period numbers. No ground-truth labels
+        # are used to shape any score.
+        batch_df = data["full"].tail(1000)
+        batch_df = batch_df.sort_values("timestamp").reset_index(drop=True)
 
         for idx, (_, row) in enumerate(batch_df.iterrows()):
             is_fraud_txn = bool(row["is_fraud"])
@@ -89,38 +98,47 @@ def seed_database():
             )
             db.add(txn)
 
-            ml_score = float(proba[idx]) * 100
-            behavioral_score = min(100, max(0, ml_score + random.uniform(-20, 20)))
+            # Mirror the live scoring semantics exactly: baseline built from the
+            # customer's prior history EXCLUDING this transaction, ml features
+            # from that baseline, and event-time recency windows.
+            profile = behavioral.update_profile(
+                row["customer_id"],
+                exclude_transaction_id=row["transaction_id"],
+                reference_ts=pd_to_dt(row["timestamp"]),
+            )
+
+            ml_row = pd.DataFrame([{
+                "transaction_id": row["transaction_id"],
+                "customer_id": row["customer_id"],
+                "amount": float(row["amount"]),
+                "currency": "INR",
+                "payment_method": row["payment_method"],
+                "merchant_category": row["merchant_category"],
+                "merchant_name": row["merchant_name"],
+                "device_id": row["device_id"],
+                "ip_address": row["ip_address"],
+                "location_city": row["location_city"],
+                "location_country": row["location_country"],
+                "timestamp": pd_to_dt(row["timestamp"]),
+                "is_fraud": False,
+                "account_age_days": int(row.get("account_age_days", 180)),
+                "customer_avg_amount": float(row["customer_avg_amount"]),
+                "customer_std_amount": float(row["customer_std_amount"]),
+                "is_new_device": int(row.get("is_new_device", 0)),
+                "is_new_city": int(row.get("is_new_city", 0)),
+            }])
+            ml_score = float(model.predict_proba(pipeline.transform(ml_row))[0]) * 100
+
+            behavioral_score = behavioral.calculate_deviation(txn, profile)
             final_score = 0.7 * ml_score + 0.3 * behavioral_score
-
-            if not is_fraud_txn:
-                # Legit transactions: mostly low, but a realistic fraction land in
-                # the human-review band (25-90) and a few false-positive criticals.
-                r = random.random()
-                if r < 0.72:
-                    final_score = random.uniform(0, 24)
-                elif r < 0.95:
-                    final_score = random.uniform(28, 85)
-                else:
-                    final_score = random.uniform(90, 99)
-            else:
-                # Fraud transactions: mostly critical (>90), some in human-review band.
-                r = random.random()
-                if r < 0.75:
-                    final_score = random.uniform(91, 99.9)
-                else:
-                    final_score = random.uniform(50, 89)
-
             final_score = min(100, max(0, final_score))
 
-            if final_score < 25:
-                tier, action, handling, hitl_band, needs_alert = "LOW", "ALLOW", "AI", "AI_AUTOPILOT", False
-            elif final_score < 60:
-                tier, action, handling, hitl_band, needs_alert = "MEDIUM", "VERIFY", "HUMAN REVIEW", "HUMAN_REVIEW", False
-            elif final_score < 90:
-                tier, action, handling, hitl_band, needs_alert = "HIGH", "REVIEW", "HUMAN REVIEW", "HUMAN_REVIEW", False
-            else:
-                tier, action, handling, hitl_band, needs_alert = "CRITICAL", "HOLD", "AI + HUMAN ALERT", "AI_MANAGED_BLOCK", True
+            tier = risk_policy.risk_tier(final_score)
+            hitl_band = risk_policy.hitl_band(final_score)
+            needs_alert = final_score >= risk_policy.BAND_BLOCK_MIN
+            action_map = {"LOW": "ALLOW", "MEDIUM": "VERIFY", "HIGH": "REVIEW", "CRITICAL": "HOLD"}
+            action = action_map[tier]
+            handling = "AI" if tier == "LOW" else ("AI + HUMAN ALERT" if tier == "CRITICAL" else "HUMAN REVIEW")
 
             assessment = RiskAssessment(
                 transaction_id=row["transaction_id"],
