@@ -5,8 +5,13 @@ from typing import List
 from app.models.database import get_db
 from app.models.models import RiskAssessment, Transaction
 from app.schemas.schemas import RiskScoreRequest
+from app.services.cost_decision import cost_decision_dict
 
 router = APIRouter()
+
+
+def _cost_for(amount: float, risk_score: float) -> dict:
+    return cost_decision_dict(amount or 0, risk_score or 0)
 
 
 @router.get("/scores")
@@ -34,6 +39,7 @@ def list_risk_scores(skip: int = 0, limit: int = 50, tier: str = None, db: Sessi
             "needs_alert": a.needs_alert,
             "ml_prediction": a.ml_prediction,
             "model_version": a.model_version,
+            "cost_decision": (a.feature_contributions or {}).get("cost_decision") or _cost_for(txn.amount if txn else 0, a.final_risk_score),
             "timestamp": a.timestamp.isoformat() if a.timestamp else None,
         })
 

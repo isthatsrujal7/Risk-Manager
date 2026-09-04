@@ -6,11 +6,62 @@ from sqlalchemy import func
 
 from app.models.database import get_db
 from app.models.models import Transaction, RiskAssessment, Review, Investigation, AuditLog
+from app.services.cost_decision import cost_decision_dict
 
 router = APIRouter()
 
 FP_COST = float(os.getenv("FP_COST_PER_INCIDENT", "50"))
 FN_COST = float(os.getenv("FN_COST_PER_INCIDENT", "500"))
+
+
+def _compute_cost_summary(db: Session) -> dict:
+    """Sum expected-loss economics over every scored transaction.
+
+    For each assessment we re-derive the same cost decision the scoring path
+    produced (allow vs flag), then aggregate expected saving. This is the
+    'honest metrics including false-positive cost' part of the brief made
+    concrete in money terms.
+    """
+    from app.services.cost_decision import (
+        DEFAULT_FRICTION_PER_REVIEW,
+        DEFAULT_FRAUD_LOSS_RATE,
+        DEFAULT_PREVENTION_RATE,
+        compute_cost_decision,
+    )
+
+    assessments = db.query(RiskAssessment).all()
+    total_saved = 0.0
+    total_exposed = 0.0
+    by_action = {}
+    decisions = 0
+    for a in assessments:
+        txn = db.query(Transaction).filter(Transaction.transaction_id == a.transaction_id).first()
+        if not txn:
+            continue
+        amount = txn.amount or 0
+        cd = compute_cost_decision(
+            amount,
+            a.final_risk_score,
+            friction_per_review=DEFAULT_FRICTION_PER_REVIEW,
+            fraud_loss_rate=DEFAULT_FRAUD_LOSS_RATE,
+            prevention_rate=DEFAULT_PREVENTION_RATE,
+        )
+        total_saved += cd.expected_saving
+        total_exposed += cd.expected_loss_allow
+        by_action[cd.decision] = by_action.get(cd.decision, 0) + 1
+        decisions += 1
+
+    return {
+        "cost_saved_total": round(max(0.0, total_saved), 2),
+        "cost_exposure_if_all_allowed": round(total_exposed, 2),
+        "cost_decision_counts": by_action,
+        "cost_decisions_computed": decisions,
+        "cost_assumptions": {
+            "friction_per_review": DEFAULT_FRICTION_PER_REVIEW,
+            "fraud_loss_rate": DEFAULT_FRAUD_LOSS_RATE,
+            "prevention_rate": DEFAULT_PREVENTION_RATE,
+        },
+    }
 
 
 @router.get("/overview")
@@ -55,6 +106,9 @@ def analytics_overview(db: Session = Depends(get_db)):
     ai_blocked = db.query(RiskAssessment).filter(RiskAssessment.risk_tier == "CRITICAL").count()
     alerts = db.query(RiskAssessment).filter(RiskAssessment.needs_alert == True).count()
 
+    # --- Cost-aware analysis across the book (expected-loss engine) ---
+    cost_summary = _compute_cost_summary(db)
+
     return {
         "total_transactions": total,
         "total_assessments": total_assessments,
@@ -88,6 +142,7 @@ def analytics_overview(db: Session = Depends(get_db)):
         "flagged_suspicious": flagged,
         "fp_cost_per_incident": FP_COST,
         "fn_cost_per_incident": FN_COST,
+        **cost_summary,
     }
 
 

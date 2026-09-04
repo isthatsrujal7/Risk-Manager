@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from app.models.models import Transaction, RiskAssessment, BehavioralProfile
 from app.services.behavioral import BehavioralFingerprintService
+from app.services.cost_decision import cost_decision_dict
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -65,6 +66,14 @@ class RiskScoringService:
         top_signals = self._get_top_signals(transaction, ml_score, behavioral_deviation, profile)
         feature_contributions = self._get_feature_contributions(transaction, profile)
 
+        cost = cost_decision_dict(transaction.amount or 0, final_score)
+        cost_action = cost["decision"]
+        # Cost-aware decision refines the fixed-tier action but never overrides
+        # the mandatory HITL block band (score >= 90).
+        if final_score >= 90:
+            cost_action = "BLOCK"
+        handling_user = self._get_handling_user(risk_tier)
+
         assessment = RiskAssessment(
             transaction_id=transaction.transaction_id,
             ml_risk_score=round(ml_score, 2),
@@ -73,12 +82,12 @@ class RiskScoringService:
             behavioral_deviation_score=round(behavioral_deviation, 2),
             final_risk_score=round(final_score, 2),
             risk_tier=risk_tier,
-            recommended_action=recommended_action,
+            recommended_action=cost_action,
             handling_user=handling_user,
             hitl_band=self._get_hitl_band(final_score),
             needs_alert=needs_alert,
             top_signals=top_signals,
-            feature_contributions=feature_contributions,
+            feature_contributions={**feature_contributions, "cost_decision": cost},
             model_version=MODEL_VERSION,
         )
 
@@ -91,10 +100,11 @@ class RiskScoringService:
             "behavioral_deviation": behavioral_deviation,
             "final_score": final_score,
             "risk_tier": risk_tier,
-            "recommended_action": recommended_action,
+            "recommended_action": cost_action,
             "handled_by": handling_user,
             "needs_alert": needs_alert,
             "hitl_band": self._get_hitl_band(final_score),
+            "cost_decision": cost,
         })
 
         if needs_alert:
@@ -124,6 +134,7 @@ class RiskScoringService:
                     "risk_tier": assessment.risk_tier,
                     "recommended_action": assessment.recommended_action,
                     "hitl_band": assessment.hitl_band,
+                    "cost_decision": (assessment.feature_contributions or {}).get("cost_decision", {}),
                     "timestamp": assessment.timestamp.isoformat() if assessment.timestamp else None,
                 },
             })

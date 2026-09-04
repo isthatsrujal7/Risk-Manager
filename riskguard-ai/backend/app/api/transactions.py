@@ -8,6 +8,7 @@ from app.models.database import get_db
 from app.models.models import Transaction, RiskAssessment
 from app.schemas.schemas import TransactionCreate, TransactionResponse, RiskAssessmentResponse, RiskScoreRequest
 from app.services.risk_scoring import RiskScoringService
+from app.services.cost_decision import cost_decision_dict
 
 router = APIRouter()
 
@@ -56,6 +57,7 @@ def get_transaction(transaction_id: str, db: Session = Depends(get_db)):
             "needs_alert": assessment.needs_alert,
             "top_signals": assessment.top_signals,
             "feature_contributions": assessment.feature_contributions,
+            "cost_decision": (assessment.feature_contributions or {}).get("cost_decision", {}),
             "model_version": assessment.model_version,
         } if assessment else None,
     }
