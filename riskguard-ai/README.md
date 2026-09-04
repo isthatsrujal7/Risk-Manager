@@ -100,42 +100,73 @@ python scripts/train_model.py && python scripts/seed_database.py
 > from. Seeding stores the **held-out test window** of the stream, so the
 > numbers you see in the UI are the numbers in the model card.
 
+> **ML artifacts are shipped in the repo.** `ml/models/fraud_model.joblib` +
+> `feature_pipeline.joblib` are committed so the ZIP/clone always contains a real
+> trained Random Forest — `GET /api/risk/scores` and the seeded stream prove the
+> ML path is live (you can never be told "that's just a rules fallback"). Forgot
+> them anyway (e.g. a stripped clone)? `scripts/docker_entrypoint.py` and
+> `scripts/seed_database.py` retrain from the same deterministic seed on boot.
+> `riskguard.db` stays git-ignored.
+
 ```bash
 # 2. Start backend (port 8000)
 cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 ```bash
-# 3. Frontend (port 5173)
+# 3. Frontend (port 5173) — sign in with a demo account first
 cd frontend && npm install && npm run dev
 ```
 
-Open <http://localhost:5173>.
+Open <http://localhost:5173> — the login screen explains the three demo
+accounts:
+
+| Username | Password | Role | Can do |
+|---|---|---|---|
+| `riskadmin` | `RiskGuard@riskadmin` | Admin | review + retrain-approve models |
+| `riskanalyst` | `RiskGuard@riskanalyst` | Analyst | review queue, alerts, feedback, ingestion |
+| `riskviewer` | `RiskGuard@riskviewer` | Viewer | read-only dashboards |
 
 **Docker (one command):**
 ```bash
 docker compose up --build
-# backend on :8000 (auto-seeds the held-out demo stream if the DB is empty),
-# frontend on :5173 (nginx with /api proxied to the backend)
+# backend on :8000 (auto-creates default users, verifies/retrains model
+# artifacts, seeds the held-out demo stream if the DB is empty),
+# frontend on :5173 (nginx with /api proxied to the backend). Both Dockerfiles
+# are committed and image tags are pinned.
 ```
 
-> Deliberate realism: `*.joblib` models and `*.db` are git-ignored; regenerate
-> with the two commands above. `honest_metrics.json` regenerates with every
-> training run.
+**PostgreSQL (production-style deployment):** the default stack uses SQLite —
+totally fine for a single-instance buildathon demo. When you want a
+team/replica-grade backend, run the PostgreSQL stack instead:
+
+```bash
+docker compose -f docker-compose.prod.yml up --build   # postgres:16 + backend
+# or without Docker:
+pip install -r backend/requirements-postgres.txt
+DATABASE_URL=postgresql+psycopg2://riskguard:secret@localhost:5432/riskguard python -m uvicorn app.main:app
+```
 
 ## Key API endpoints
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /api/transactions/` | Score a transaction (returns cost decision) |
-| `GET /api/transactions/{id}` | Detail incl. `cost_decision` (expected loss / saving) |
-| `GET /api/risk/scores` | Assessments incl. cost decision per score |
-| `GET /api/analytics/overview` | Dashboard + expected-loss savings across the book |
-| `GET /api/analytics/model-performance` | P/R/F1 + **honest_evaluation** (leakage, CIs, cost point) |
-| `GET/POST /api/reviews/` | Human review + feedback labels |
-| `POST /api/feedback-loop/retrain` | Stage a **candidate** model on human labels (active model unchanged) |
-| `POST /api/feedback-loop/approve` | Explicitly promote an approved candidate to the active model |
-| `GET /api/spikes/detect` | Time-anchored fraud spike detection |
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `POST /api/auth/login` | public | Login → bearer token (8h, HMAC-signed with `SECRET_KEY`) |
+| `GET /api/auth/me` | bearer | Current user + role |
+| `POST /api/transactions/` | analyst+ | Score a transaction (returns cost decision) |
+| `GET /api/transactions/{id}` | read | Detail incl. `cost_decision` (expected loss / saving) |
+| `GET /api/risk/scores` | read | Assessments incl. cost decision per score |
+| `GET /api/analytics/overview` | read | Dashboard + expected-loss savings across the book |
+| `GET /api/analytics/model-performance` | read | P/R/F1 + **honest_evaluation** (leakage, CIs, cost point) |
+| `GET/POST /api/reviews/` | read / analyst+ | Human review + feedback labels |
+| `POST /api/feedback-loop/retrain` | **admin** | Stage a **candidate** model on human labels (active model unchanged) |
+| `POST /api/feedback-loop/approve` | **admin** | Explicitly promote an approved candidate to the active model |
+| `GET /api/spikes/detect` | read | Time-anchored fraud spike detection |
+| `GET/PATCH /api/alerts/` | read / analyst+ | Critical block alerts, ack & resolve |
+
+RBAC matrix: **read** = any authenticated role (admin/analyst/viewer). Model
+retraining governance is admin-only, and the reviewed/credited `reviewer_name`
+comes from the authenticated session, never from the request body.
 
 ## Documentation
 
@@ -148,13 +179,24 @@ docker compose up --build
 
 ```env
 DATABASE_URL=sqlite:///./riskguard.db
+# Production-style deployment (PostgreSQL):
+# DATABASE_URL=postgresql+psycopg2://riskguard:secret@host:5432/riskguard
+#   -> pip install -r backend/requirements-postgres.txt
 LLM_PROVIDER=openai          # optional; deterministic fallback built-in
 LLM_API_KEY=
 LLM_MODEL=gpt-4
+SECRET_KEY=change-me-in-production
+# Optional per-role password overrides (defaults: RiskGuard@riskadmin / @riskanalyst / @riskviewer)
+RISK_ADMIN_PASSWORD=
+RISK_ANALYST_PASSWORD=
+RISK_VIEWER_PASSWORD=
 FP_COST_PER_INCIDENT=50.0    # ₹25 review labor + ₹25 CX friction
 FN_COST_PER_INCIDENT=500.0   # missed chargeback
 RISK_BAND_AUTOPILOT_MAX=25   # HITL band ceilings (risk_policy.py)
 RISK_BAND_BLOCK_MIN=90       # HITL band floor for AI_MANAGED_BLOCK
+ALERT_WEBHOOK_URL=           # optional external alert delivery (notifications.py)
+ALERT_SLACK_WEBHOOK=
+ALERT_EMAIL_TO=
 ```
 
 ## License

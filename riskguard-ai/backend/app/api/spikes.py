@@ -8,8 +8,9 @@ from app.risk.spike_detection import (
     get_spike_history,
     build_spike_timeseries,
 )
+from app.auth import get_current_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/detect")

@@ -1,10 +1,55 @@
 const API_BASE = '/api';
 
+export interface CurrentUser { username: string; role: string; display_name?: string }
+
+const TOKEN_KEY = 'riskguard_token';
+const USER_KEY = 'riskguard_user';
+
+export function getToken(): string | null {
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+
+export function setSession(token: string, user: CurrentUser) {
+  try {
+    localStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+  } catch { /* storage unavailable (tests/incognito) */ }
+}
+
+export function clearSession() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+  } catch { /* noop */ }
+}
+
+export function currentUser(): CurrentUser | null {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? JSON.parse(raw) as CurrentUser : null;
+  } catch { return null; }
+}
+
+export function hasRole(...roles: string[]): boolean {
+  const u = currentUser();
+  return !!u && roles.includes(u.role);
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${url}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...options?.headers },
     ...options,
   });
+  if (res.status === 401 && !url.startsWith('/auth/login')) {
+    clearSession();
+    if (window.location.pathname !== '/login') window.location.assign('/login');
+    throw new Error('Session expired. Please sign in again.');
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API Error ${res.status}: ${text}`);
@@ -14,6 +59,14 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => fetchJSON<{ status: string }>('/health'),
+
+  login: (username: string, password: string) =>
+    fetchJSON<{ access_token: string; user: CurrentUser }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+
+  me: () => fetchJSON<CurrentUser>('/auth/me'),
 
   getTransactions: (skip = 0, limit = 50) =>
     fetchJSON<any[]>(`/transactions/?skip=${skip}&limit=${limit}`),

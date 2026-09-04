@@ -1,0 +1,60 @@
+version: '3.8'
+
+# Production-style deployment: PostgreSQL instead of the demo's SQLite.
+# The default docker-compose.yml keeps a self-contained single-backend stack
+# (SQLite is fine for a single-instance buildathon demo); this override swaps
+# storage to PostgreSQL for a team/replica-grade backend. It is intentionally a
+# COMPLETE compose file (not an override) so it can be run standalone:
+#
+#   docker compose -f docker-compose.prod.yml up --build
+#
+# The backend installs the PostgreSQL driver (psycopg2) at boot and keeps the
+# same seed-if-empty + default-users + verify-model entrypoint.
+
+services:
+  db:
+    image: postgres:16.3-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: riskguard
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-riskguard-demo}
+      POSTGRES_DB: riskguard
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U riskguard -d riskguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://riskguard:${POSTGRES_PASSWORD:-riskguard-demo}@db:5432/riskguard
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+    volumes:
+      - ./:/workspace
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "pip install --no-cache-dir -r /workspace/backend/requirements-postgres.txt && python /workspace/scripts/docker_entrypoint.py && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

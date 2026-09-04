@@ -6,8 +6,9 @@ from app.models.database import get_db
 from app.models.models import RiskAssessment, Transaction
 from app.schemas.schemas import RiskScoreRequest
 from app.services.cost_decision import cost_decision_dict
+from app.auth import get_current_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 def _cost_for(amount: float, risk_score: float) -> dict:

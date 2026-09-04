@@ -239,6 +239,37 @@ a single row *and* a stable `assessment_id` after two `/score` calls.
 
 ---
 
+## Incident 13 — Retrain crashed: "Cannot convert non-finite values (NA or inf) to integer"
+
+**Symptom**: after review feedback was merged, `POST /api/feedback-loop/retrain`
+returned 500 from the feature extractor. Human-labeled rows carry
+`is_new_device`/`is_new_city` (computed at *review* time), but the candidate
+assembler concatenated them with synthetic base rows that don't have those
+columns — the merged DataFrame had `NaN`s, and `feature_pipeline.py` called
+`.astype(int)` on them.
+
+**Root cause**: train/serve feature parity was assumed, not enforced: the
+feature extractor for candidate training read a column layout that differs
+from the live scoring path (`BehavioralProfile.common_devices` /
+`common_locations` exist on profiles, not on transaction rows).
+
+**Fix**:
+- `ml/src/feature_pipeline.py` — guard the flag columns with
+  `.fillna(0).astype(int)` so any future NULL path degrades to "agent sees a
+  new device/city", never a crash.
+- `backend/app/services/feedback_loop.py::_extract_human_labeled_data` —
+  compute `is_new_device` / `is_new_city` from the customer's
+  `BehavioralProfile` at labeling time, the same semantics the live scorer
+  uses.
+
+**Guard**: `POST /api/feedback-loop/retrain` is covered by an end-to-end test
+that merges human-labeled (flagged) rows with synthetic rows and asserts the
+candidate trains and is staged (`status=failed` fails the test). The fix was
+verified live: retrain staged candidate `fb-20260904183218` (F1 0.8571) while
+the active `v1.0-random_forest` stayed untouched.
+
+---
+
 ## How we prevent recurrence
 
 - Endpoints are smoke-tested after every change (see `backend` test list).

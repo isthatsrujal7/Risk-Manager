@@ -40,13 +40,15 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     # Preserve caller-provided values (live serving computes these from the real
     # behavioral profile) instead of silently zeroing them. Only default when the
     # column is absent, so training and serving stay on the same feature space.
+    # fillna(0) guards feedback-loop rows that were merged from DB records and
+    # may not carry these flags on every frame.
     if "is_new_device" in df.columns:
-        df["is_new_device"] = df["is_new_device"].astype(int)
+        df["is_new_device"] = df["is_new_device"].fillna(0).astype(int)
     else:
         df["is_new_device"] = 0
 
     if "is_new_city" in df.columns:
-        df["is_new_city"] = df["is_new_city"].astype(int)
+        df["is_new_city"] = df["is_new_city"].fillna(0).astype(int)
     else:
         df["is_new_city"] = 0
 

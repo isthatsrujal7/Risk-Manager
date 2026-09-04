@@ -3,12 +3,21 @@ __pycache__/
 .env
 *.db
 *.sqlite3
+# The trained demo model artifacts (ml/models/fraud_model.joblib,
+# ml/models/feature_pipeline.joblib) are intentionally TRACKED so the packaged
+# ZIP / clone ships with a working model and the presenter can always prove the
+# ML path is live (never heuristic fallback). Delete them to force retraining.
 node_modules/
 dist/
 build/
 .vite/
-ml/models/*.joblib
 ml/data/*.csv
 .ml_cache/
+# Runtime feedback-loop artifacts: staged candidate snapshots are transient
+# (the promoted model is saved as the canonical fraud_model.joblib). Governance
+# history in ml/models/feedback_loop_history.json IS tracked.
+ml/models/_candidates/
+ml/models/*_fb-*.joblib
+frontend/tsconfig.tsbuildinfo
 *.log
 .DS_Store

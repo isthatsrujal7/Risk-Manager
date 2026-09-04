@@ -4,10 +4,11 @@ from sqlalchemy import func
 from typing import List
 
 from app.models.database import get_db
-from app.models.models import Review, Transaction, RiskAssessment, AuditLog
+from app.models.models import Review, Transaction, RiskAssessment, AuditLog, User
 from app.schemas.schemas import FeedbackCreate
+from app.auth import get_current_user, require_roles
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/summary")
@@ -108,7 +109,7 @@ def export_feedback_data(db: Session = Depends(get_db)):
 
 
 @router.post("/record-outcome")
-def record_outcome(feedback: FeedbackCreate, db: Session = Depends(get_db)):
+def record_outcome(feedback: FeedbackCreate, user: User = Depends(require_roles("analyst", "admin")), db: Session = Depends(get_db)):
     review = db.query(Review).filter(Review.transaction_id == feedback.transaction_id).first()
     if review:
         review.outcome = feedback.outcome

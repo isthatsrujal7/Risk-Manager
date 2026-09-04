@@ -3,10 +3,11 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from app.models.database import get_db
-from app.models.models import Investigation, Transaction, RiskAssessment, Review
+from app.models.models import Investigation, Transaction, RiskAssessment, Review, User
 from app.agents.investigation_agent import InvestigationAgent
+from app.auth import get_current_user, require_roles
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/")
@@ -92,7 +93,7 @@ def get_investigation(investigation_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{transaction_id}/investigate")
-def run_investigation(transaction_id: str, db: Session = Depends(get_db)):
+def run_investigation(transaction_id: str, user: User = Depends(require_roles("analyst", "admin")), db: Session = Depends(get_db)):
     txn = db.query(Transaction).filter(Transaction.transaction_id == transaction_id).first()
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")

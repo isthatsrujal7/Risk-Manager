@@ -23,6 +23,10 @@ def seed_database():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
+    from app.auth import ensure_default_users
+    ensure_default_users()
+    print("Default viewer/analyst/admin accounts ensured.")
+
     print("Generating synthetic data...")
     data = generate_synthetic_data(n_customers=200, n_transactions=5000, fraud_rate=0.05, seed=42)
 

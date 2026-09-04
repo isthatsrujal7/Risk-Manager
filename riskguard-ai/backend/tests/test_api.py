@@ -29,9 +29,29 @@ def setup_db():
     Base.metadata.drop_all(bind=engine)
 
 
+@pytest.fixture(scope="module")
+def admin_token():
+    from app.auth import ensure_default_users
+    ensure_default_users()
+    c = TestClient(app)
+    r = c.post("/api/auth/login", json={"username": "riskadmin", "password": "RiskGuard@riskadmin"})
+    assert r.status_code == 200, r.text
+    return r.json()["access_token"]
+
+
+@pytest.fixture(scope="module")
+def viewer_token():
+    from app.auth import ensure_default_users
+    ensure_default_users()
+    c = TestClient(app)
+    r = c.post("/api/auth/login", json={"username": "riskviewer", "password": "RiskGuard@riskviewer"})
+    assert r.status_code == 200, r.text
+    return r.json()["access_token"]
+
+
 @pytest.fixture
-def client():
-    return TestClient(app)
+def client(admin_token):
+    return TestClient(app, headers={"Authorization": f"Bearer {admin_token}"})
 
 
 @pytest.fixture
@@ -208,3 +228,48 @@ class TestInvestigations:
     def test_list_investigations(self, client):
         response = client.get("/api/investigations/")
         assert response.status_code == 200
+
+
+class TestAuth:
+    def test_login_success(self):
+        c = TestClient(app)
+        r = c.post("/api/auth/login", json={"username": "riskadmin", "password": "RiskGuard@riskadmin"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["access_token"]
+        assert body["user"]["role"] == "admin"
+
+    def test_login_wrong_password_rejected(self):
+        c = TestClient(app)
+        r = c.post("/api/auth/login", json={"username": "riskadmin", "password": "wrong"})
+        assert r.status_code == 401
+
+    def test_unauthenticated_read_rejected(self):
+        c = TestClient(app)
+        assert c.get("/api/reviews/").status_code == 401
+        assert c.get("/api/analytics/overview").status_code == 401
+
+    def test_viewer_can_read(self, viewer_token):
+        c = TestClient(app, headers={"Authorization": f"Bearer {viewer_token}"})
+        assert c.get("/api/reviews/").status_code == 200
+        assert c.get("/api/analytics/overview").status_code == 200
+
+    def test_viewer_cannot_review_or_retrain(self, viewer_token):
+        c = TestClient(app, headers={"Authorization": f"Bearer {viewer_token}"})
+        assert c.post("/api/reviews/", json={
+            "investigation_id": "x", "transaction_id": "y",
+            "human_decision": "APPROVED", "reviewer_note": "",
+        }).status_code == 403
+        assert c.post("/api/feedback-loop/retrain").status_code == 403
+
+    def test_analyst_cannot_retrain(self):
+        c = TestClient(app)
+        r = c.post("/api/auth/login", json={"username": "riskanalyst", "password": "RiskGuard@riskanalyst"})
+        assert r.status_code == 200
+        analyst = TestClient(app, headers={"Authorization": f"Bearer {r.json()['access_token']}"})
+        assert analyst.post("/api/feedback-loop/retrain").status_code == 403
+        assert analyst.get("/api/feedback-loop/status").status_code == 200
+
+    def test_health_and_login_public(self):
+        c = TestClient(app)
+        assert c.get("/api/health").status_code == 200

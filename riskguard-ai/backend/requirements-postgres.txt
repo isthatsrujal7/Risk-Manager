@@ -1,0 +1,8 @@
+# Optional dependency to point the backend at PostgreSQL (production-style
+# deployment). NOT in base requirements.txt so the default demo install stays
+# lean; installed by docker-compose.prod.yml and documented in the README.
+#
+#   pip install -r backend/requirements-postgres.txt
+#
+# then run with DATABASE_URL=postgresql+psycopg2://user:pass@host:5432/dbname
+psycopg2-binary==2.9.9

@@ -8,8 +8,9 @@ from app.models.database import get_db
 from app.models.models import Transaction, RiskAssessment, Review, Investigation, AuditLog
 from app.services.cost_decision import cost_decision_dict
 from app.services.model_paths import EVAL_METRICS_PATH, HONEST_METRICS_PATH
+from app.auth import get_current_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 FP_COST = float(os.getenv("FP_COST_PER_INCIDENT", "50"))
 FN_COST = float(os.getenv("FN_COST_PER_INCIDENT", "500"))

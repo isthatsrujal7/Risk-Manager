@@ -1,6 +1,6 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import { api, currentUser, clearSession } from '../services/api';
 
 const navItems = [
   { to: '/', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1' },
@@ -19,6 +19,8 @@ const navItems = [
 
 export default function Layout() {
   const [pendingCount, setPendingCount] = useState(0);
+  const user = currentUser();
+  const navigate = useNavigate();
 
   useEffect(() => {
     api.getPendingReviewCount().then(d => setPendingCount(d.pending_count)).catch(() => {});
@@ -27,6 +29,11 @@ export default function Layout() {
     }, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  const handleLogout = () => {
+    clearSession();
+    navigate('/login');
+  };
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -62,8 +69,19 @@ export default function Layout() {
           ))}
         </nav>
         <div className="p-4 border-t border-gray-800 text-xs text-gray-500">
-          <p>Model: v1.0</p>
-          <p>Razorpay Buildathon</p>
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <p className="font-semibold text-gray-300">{user?.display_name || user?.username}</p>
+              <p className="uppercase tracking-wide">{user?.role} role</p>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-red-900 hover:text-white transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
+          <p>Model: v1.0 · Razorpay Buildathon</p>
         </div>
       </aside>
       <main className="flex-1 overflow-auto">

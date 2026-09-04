@@ -163,6 +163,17 @@ class RiskScoreRequest(BaseModel):
     transaction_id: str
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class UserOut(BaseModel):
+    username: str
+    role: str
+    display_name: Optional[str] = None
+
+
 class EvidenceItem(BaseModel):
     type: str = ""
     value: Any = None

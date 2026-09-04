@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../services/api';
+import { api, hasRole } from '../services/api';
 
 export default function ReviewQueue() {
   const [reviews, setReviews] = useState<any[]>([]);
@@ -10,6 +10,8 @@ export default function ReviewQueue() {
   const [decision, setDecision] = useState('');
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const canDecide = hasRole('analyst', 'admin');
 
   const loadReviews = () => {
     api.getReviews(0, 100, filter || undefined)
@@ -29,7 +31,6 @@ export default function ReviewQueue() {
         transaction_id: selectedReview.transaction_id,
         human_decision: decision,
         reviewer_note: note,
-        reviewer_name: 'admin',
       });
       setSelectedReview(null);
       setDecision('');
@@ -114,7 +115,8 @@ export default function ReviewQueue() {
               </div>
 
               {!selectedReview.human_decision ? (
-                <div className="space-y-4">
+                canDecide ? (
+                  <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Your Decision</label>
                     <div className="grid grid-cols-2 gap-2">
@@ -138,6 +140,12 @@ export default function ReviewQueue() {
                   </button>
                 </div>
               ) : (
+                <div className="p-4 bg-gray-50 rounded-lg">
+                  <p className="text-sm text-gray-500">Read-only access</p>
+                  <p className="text-sm text-gray-600 mt-1">Your role can view the queue but cannot submit decisions. Sign in as an analyst or admin to decide.</p>
+                </div>
+              )
+            ) : (
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <p className="text-sm text-gray-500">Decision Already Made</p>
                   <p className="font-bold">{selectedReview.human_decision}</p>

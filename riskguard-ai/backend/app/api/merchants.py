@@ -2,17 +2,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.models.database import get_db
+from app.models.models import User
 from app.services.merchant_risk import (
     compute_merchant_profiles,
     list_merchant_profiles,
     get_merchant_profile,
 )
+from app.auth import get_current_user, require_roles
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.post("/rebuild")
-def rebuild_profiles(db: Session = Depends(get_db)):
+def rebuild_profiles(user: User = Depends(require_roles("analyst", "admin")), db: Session = Depends(get_db)):
     compute_merchant_profiles(db)
     return {"status": "ok", "message": "Merchant risk profiles rebuilt"}
 

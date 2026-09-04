@@ -4,10 +4,11 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models.database import get_db
-from app.models.models import Alert
+from app.models.models import Alert, User
 from app.services.notifications import create_alert, ack_alert
+from app.auth import get_current_user, require_roles
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 class AcknowledgeRequest(BaseModel):
@@ -55,7 +56,7 @@ def alert_summary(db: Session = Depends(get_db)):
 
 
 @router.post("/{alert_id}/acknowledge")
-def acknowledge(alert_id: str, body: AcknowledgeRequest, db: Session = Depends(get_db)):
+def acknowledge(alert_id: str, body: AcknowledgeRequest, user: User = Depends(require_roles("analyst", "admin")), db: Session = Depends(get_db)):
     alert = ack_alert(db, alert_id, body.status or "ACKNOWLEDGED", body.assigned_to, body.resolution_note)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
@@ -63,7 +64,7 @@ def acknowledge(alert_id: str, body: AcknowledgeRequest, db: Session = Depends(g
 
 
 @router.post("/{alert_id}/resolve")
-def resolve(alert_id: str, body: AcknowledgeRequest, db: Session = Depends(get_db)):
+def resolve(alert_id: str, body: AcknowledgeRequest, user: User = Depends(require_roles("analyst", "admin")), db: Session = Depends(get_db)):
     alert = ack_alert(db, alert_id, "RESOLVED", body.assigned_to, body.resolution_note)
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")

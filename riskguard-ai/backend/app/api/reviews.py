@@ -4,10 +4,11 @@ from typing import List
 from datetime import datetime, timezone
 
 from app.models.database import get_db
-from app.models.models import Review, Investigation, Transaction, AuditLog
+from app.models.models import Review, Investigation, Transaction, AuditLog, User
 from app.schemas.schemas import ReviewCreate
+from app.auth import get_current_user, require_roles
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/")
@@ -51,17 +52,18 @@ def pending_review_count(db: Session = Depends(get_db)):
 
 
 @router.post("/")
-def submit_review(review: ReviewCreate, db: Session = Depends(get_db)):
+def submit_review(review: ReviewCreate, user: User = Depends(require_roles("analyst", "admin")), db: Session = Depends(get_db)):
     db_review = db.query(Review).filter(Review.investigation_id == review.investigation_id).first()
     if not db_review:
         raise HTTPException(status_code=404, detail="Review not found for this investigation")
 
     inv = db.query(Investigation).filter(Investigation.investigation_id == review.investigation_id).first()
     txn = db.query(Transaction).filter(Transaction.transaction_id == review.transaction_id).first()
+    reviewer_name = review.reviewer_name or (user.display_name or user.username)
 
     db_review.human_decision = review.human_decision
     db_review.reviewer_note = review.reviewer_note
-    db_review.reviewer_name = review.reviewer_name
+    db_review.reviewer_name = reviewer_name
     db_review.decision_timestamp = datetime.now(timezone.utc)
 
     if txn and txn.is_fraud and review.human_decision == "APPROVED":
@@ -76,7 +78,7 @@ def submit_review(review: ReviewCreate, db: Session = Depends(get_db)):
             "investigation_id": review.investigation_id,
             "ai_recommendation": db_review.ai_recommendation,
             "human_decision": review.human_decision,
-            "reviewer": review.reviewer_name,
+            "reviewer": reviewer_name,
             "note": review.reviewer_note,
             "is_false_positive": db_review.is_false_positive,
             "is_false_negative": db_review.is_false_negative,

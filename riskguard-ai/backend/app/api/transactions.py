@@ -5,12 +5,13 @@ from datetime import datetime, timezone
 import uuid
 
 from app.models.database import get_db
-from app.models.models import Transaction, RiskAssessment
+from app.models.models import Transaction, RiskAssessment, User
 from app.schemas.schemas import TransactionCreate, TransactionResponse, RiskAssessmentResponse, RiskScoreRequest
 from app.services.risk_scoring import RiskScoringService
 from app.services.cost_decision import cost_decision_dict
+from app.auth import get_current_user, require_roles
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/", response_model=List[TransactionResponse])
@@ -64,7 +65,7 @@ def get_transaction(transaction_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/")
-def create_transaction(txn: TransactionCreate, db: Session = Depends(get_db)):
+def create_transaction(txn: TransactionCreate, user: User = Depends(require_roles("analyst", "admin")), db: Session = Depends(get_db)):
     txn_id = f"TXN-{uuid.uuid4().hex[:12].upper()}"
     db_txn = Transaction(
         transaction_id=txn_id,
@@ -103,7 +104,7 @@ def create_transaction(txn: TransactionCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/{transaction_id}/score")
-def score_transaction(transaction_id: str, db: Session = Depends(get_db)):
+def score_transaction(transaction_id: str, user: User = Depends(require_roles("analyst", "admin")), db: Session = Depends(get_db)):
     txn = db.query(Transaction).filter(Transaction.transaction_id == transaction_id).first()
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")

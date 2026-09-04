@@ -220,3 +220,14 @@ class Alert(Base):
     resolved_at = Column(DateTime, nullable=True)
     resolution_note = Column(Text, default="")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    user_id = Column(String, primary_key=True, default=lambda: gen_id("USR-"))
+    username = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    role = Column(String, default="viewer")   # viewer / analyst / admin
+    display_name = Column(String, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

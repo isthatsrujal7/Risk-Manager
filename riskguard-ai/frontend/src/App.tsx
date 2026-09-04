@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
+import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
 import TransactionDetail from './pages/TransactionDetail';
@@ -14,12 +15,26 @@ import MerchantRisk from './pages/MerchantRisk';
 import LiveFeed from './pages/LiveFeed';
 import Alerts from './pages/Alerts';
 import FeedbackLoop from './pages/FeedbackLoop';
+import { getToken } from './services/api';
+
+function RequireAuth({ children }: { children: JSX.Element }) {
+  if (!getToken()) return <Navigate to="/login" replace />;
+  return children;
+}
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Layout />}>
+        <Route path="/login" element={<Login />} />
+        <Route
+          path="/"
+          element={
+            <RequireAuth>
+              <Layout />
+            </RequireAuth>
+          }
+        >
           <Route index element={<Dashboard />} />
           <Route path="transactions" element={<Transactions />} />
           <Route path="transactions/:id" element={<TransactionDetail />} />
@@ -35,6 +50,7 @@ export default function App() {
           <Route path="alerts" element={<Alerts />} />
           <Route path="feedback-loop" element={<FeedbackLoop />} />
         </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

@@ -17,11 +17,14 @@ from app.api.merchants import router as merchants_router
 from app.api.live import router as live_router
 from app.api.alerts import router as alerts_router
 from app.api.feedback_loop import router as feedback_loop_router
+from app.api.auth import router as auth_router
 from app.models.database import engine, Base
+from app.auth import ensure_default_users
 
 load_dotenv()
 
 Base.metadata.create_all(bind=engine)
+ensure_default_users()
 
 app = FastAPI(
     title="RiskGuard AI",
@@ -50,6 +53,7 @@ app.include_router(merchants_router, prefix="/api/merchants", tags=["Merchant Ri
 app.include_router(live_router, prefix="/api/live", tags=["Real-time Monitoring"])
 app.include_router(alerts_router, prefix="/api/alerts", tags=["Alert System"])
 app.include_router(feedback_loop_router, prefix="/api/feedback-loop", tags=["Model Feedback Loop"])
+app.include_router(auth_router, prefix="/api/auth", tags=["Authentication"])
 
 
 @app.get("/api/health")

@@ -6,8 +6,9 @@ from collections import Counter
 from app.models.database import get_db
 from app.models.models import Transaction, FraudPatternTrack, Customer, AuditLog
 from app.risk.fraud_patterns import FraudPatternDetector, FraudPatternType, PATTERN_DESCRIPTIONS
+from app.auth import get_current_user
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 @router.get("/templates")

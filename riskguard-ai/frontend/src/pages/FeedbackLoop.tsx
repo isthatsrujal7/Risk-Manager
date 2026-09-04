@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api } from '../services/api';
+import { api, hasRole } from '../services/api';
 
 export default function FeedbackLoop() {
   const [status, setStatus] = useState<any>(null);
@@ -29,6 +29,8 @@ export default function FeedbackLoop() {
     } finally { setRetraining(false); }
   };
 
+  const isAdmin = hasRole('admin');
+
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600" /></div>;
 
   return (
@@ -36,12 +38,18 @@ export default function FeedbackLoop() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Model Feedback Loop</h1>
-          <p className="text-sm text-gray-500 mt-1">Uses human review decisions to retrain and version the fraud model.</p>
+          <p className="text-sm text-gray-500 mt-1">Uses human review decisions to retrain and version the fraud model. Retraining is admin-only and always stages a candidate for explicit approval.</p>
         </div>
-        <button onClick={handleRetrain} disabled={retraining}
-          className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
-          {retraining ? 'Retraining...' : 'Retrain Model Now'}
-        </button>
+        {isAdmin ? (
+          <button onClick={handleRetrain} disabled={retraining}
+            className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
+            {retraining ? 'Retraining...' : 'Retrain Model Now'}
+          </button>
+        ) : (
+          <span className="px-4 py-2 bg-gray-100 text-gray-500 rounded-lg text-sm font-medium border border-gray-200">
+            Admin only
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

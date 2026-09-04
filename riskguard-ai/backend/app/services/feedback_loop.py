@@ -42,6 +42,17 @@ def _extract_human_labeled_data(db: Session) -> pd.DataFrame:
         avg_amt = profile.avg_transaction_amount if profile and profile.avg_transaction_amount else (txn.amount or 1000)
         std_amt = profile.std_transaction_amount if profile and profile.std_transaction_amount else (avg_amt * 0.4)
 
+        # Same semantics as live serving: a device/city is "new" when it is not
+        # part of the customer's established behavior.
+        if profile is not None:
+            known_devices = set(profile.common_devices or [])
+            known_locations = set(profile.common_locations or [])
+            is_new_device = int(txn.device_id not in known_devices)
+            is_new_city = int(txn.location_city not in known_locations)
+        else:
+            is_new_device = 0
+            is_new_city = 0
+
         ts = txn.timestamp or datetime.now(timezone.utc)
         if ts.tzinfo is None:
             # Synthetic data generator emits tz-aware UTC timestamps; match that
@@ -64,6 +75,8 @@ def _extract_human_labeled_data(db: Session) -> pd.DataFrame:
             "location_country": txn.location_country or "IN",
             "timestamp": ts,
             "is_fraud": label,
+            "is_new_device": is_new_device,
+            "is_new_city": is_new_city,
             "account_age_days": 180,
             "customer_avg_amount": avg_amt,
             "customer_std_amount": std_amt,

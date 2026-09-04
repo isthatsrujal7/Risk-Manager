@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11.9-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -8,6 +8,8 @@ WORKDIR /workspace
 COPY backend/requirements.txt backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
+# Whole codebase (incl. committed ml/models/*.joblib artifacts) is copied in so
+# the image is self-contained even without the bind mount used by docker-compose.
 COPY backend backend
 COPY ml ml
 COPY scripts scripts
@@ -15,7 +17,7 @@ COPY scripts scripts
 EXPOSE 8000
 WORKDIR /workspace/backend
 
-# Seed the held-out demo stream on first boot (only when the DB is empty), then
-# serve. DATABASE_URL and the ml/ package resolve against /workspace the same
-# way they do in local development.
+# Seed default users + the held-out demo stream on first boot (only when empty),
+# retrain artifacts if absent, then serve. DATABASE_URL and the ml/ package
+# resolve against /workspace the same way they do in local development.
 CMD ["sh", "-c", "python /workspace/scripts/docker_entrypoint.py && python -m uvicorn app.main:app --host 0.0.0.0 --port 8000"]
