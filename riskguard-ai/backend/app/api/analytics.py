@@ -7,6 +7,7 @@ from sqlalchemy import func
 from app.models.database import get_db
 from app.models.models import Transaction, RiskAssessment, Review, Investigation, AuditLog
 from app.services.cost_decision import cost_decision_dict
+from app.services.model_paths import EVAL_METRICS_PATH, HONEST_METRICS_PATH
 
 router = APIRouter()
 
@@ -94,10 +95,9 @@ def analytics_overview(db: Session = Depends(get_db)):
     total_fp_cost = fp * FP_COST
     total_fn_cost = fn * FN_COST
 
-    metrics_path = "ml/models/evaluation_metrics.json"
     model_version = "v1.0"
-    if os.path.exists(metrics_path):
-        with open(metrics_path) as f:
+    if os.path.exists(EVAL_METRICS_PATH):
+        with open(EVAL_METRICS_PATH) as f:
             metrics = json.load(f)
             model_version = metrics.get("model_version", "v1.0")
 
@@ -148,11 +148,17 @@ def analytics_overview(db: Session = Depends(get_db)):
 
 @router.get("/model-performance")
 def model_performance(db: Session = Depends(get_db)):
-    metrics_path = "ml/models/evaluation_metrics.json"
-    if os.path.exists(metrics_path):
-        with open(metrics_path) as f:
-            return json.load(f)
-    return {"error": "Model metrics not found. Run training first."}
+    result = {}
+    if os.path.exists(EVAL_METRICS_PATH):
+        with open(EVAL_METRICS_PATH) as f:
+            result = json.load(f)
+    else:
+        result = {"error": "Model metrics not found. Run training first."}
+
+    if os.path.exists(HONEST_METRICS_PATH):
+        with open(HONEST_METRICS_PATH) as f:
+            result["honest_evaluation"] = json.load(f)
+    return result
 
 
 @router.get("/risk-trends")

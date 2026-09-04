@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from app.models.models import Transaction, RiskAssessment, BehavioralProfile
 from app.services.behavioral import BehavioralFingerprintService
 from app.services.cost_decision import cost_decision_dict
+from app.services import model_paths
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -25,8 +26,8 @@ def _load_model():
         from ml.src.model import FraudModel
         from ml.src.feature_pipeline import FeaturePipeline
 
-        model_path = "ml/models/fraud_model.joblib"
-        pipeline_path = "ml/models/feature_pipeline.joblib"
+        model_path = model_paths.model_path("fraud_model.joblib")
+        pipeline_path = model_paths.model_path("feature_pipeline.joblib")
 
         if os.path.exists(model_path) and os.path.exists(pipeline_path):
             _model = FraudModel()
@@ -59,7 +60,6 @@ class RiskScoringService:
         final_score = min(100, max(0, final_score))
 
         risk_tier = self._get_risk_tier(final_score)
-        recommended_action = self._get_recommended_action(risk_tier)
         handling_user = self._get_handling_user(risk_tier)
         needs_alert = final_score >= 90
 

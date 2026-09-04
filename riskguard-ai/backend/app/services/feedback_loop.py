@@ -10,8 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from sqlalchemy.orm import Session
 
 from app.models.models import Transaction, Review, RiskAssessment
-
-MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "ml", "models")
+from app.services.model_paths import MODEL_DIR
 
 
 def _extract_human_labeled_data(db: Session) -> pd.DataFrame:

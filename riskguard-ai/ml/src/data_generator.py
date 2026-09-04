@@ -37,13 +37,61 @@ def generate_synthetic_data(n_customers=200, n_transactions=5000, fraud_rate=0.0
         cust = random.choice(customers)
         is_fraud = random.random() < fraud_rate
 
+        # Fraud is not a single template in reality. We model three behaviours:
+        #   opportunistic  (70%) - obvious red flags, the classic carded account
+        #   sophisticated  (27%) - near-normal profile, a subtle slip (bad hour
+        #                          or slightly-elevated spend) we can still learn
+        #   silent / mule  (3%)  - full mimicry, genuinely hard to spot
+        # This produces the honest, unflattering overlap real risk teams face.
+        fraud_style = None
         if is_fraud:
+            style = random.random()
+            if style < 0.70:
+                fraud_style = "opportunistic"
+            elif style < 0.97:
+                fraud_style = "sophisticated"
+            else:
+                fraud_style = "mule"
+
+        if not is_fraud:
+            amt = max(10, np.random.normal(cust["avg_amount"], cust["std_amount"]))
+            hour = max(0, min(23, int(np.random.normal(cust["typical_hour"], 3))))
+            cat = random.choice(cust["preferred_categories"])
+            device = random.choice(cust["preferred_devices"])
+            city = random.choice(cust["preferred_cities"])
+            # Legitimate novelty: real customers travel, hit emergencies, and
+            # occasionally buy big. Some of these look indistinguishable from
+            # fraud (midnight hotel booking on a new device) - these are the
+            # false positives every reviewer has to eat, and where FP cost lives.
+            if random.random() < 0.03:
+                novelty = random.random()
+                if novelty < 0.30:
+                    amt = cust["avg_amount"] * np.random.uniform(1.5, 2.5)
+                    device = f"DEV-{random.randint(10000, 99999)}"
+                elif novelty < 0.55:
+                    city = random.choice(["Unknown", "Foreign", "Nairobi", "Moscow", "Lagos"])
+                    cat = random.choice(["travel", "electronics"])
+                elif novelty < 0.80:
+                    hour = random.choice([1, 2, 3, 4, 5, 23])
+                    device = f"DEV-{random.randint(10000, 99999)}"
+                else:
+                    amt = cust["avg_amount"] * np.random.uniform(2.5, 4.0)
+                    hour = random.choice([1, 2, 3, 4, 5, 23])
+        elif fraud_style == "opportunistic":
             amt = cust["avg_amount"] * np.random.uniform(3, 15)
             hour = random.choice([1, 2, 3, 4, 5, 23])
             cat = random.choice(["electronics", "travel", "utilities"])
             device = f"DEV-{random.randint(10000, 99999)}"
             city = random.choice(["Unknown", "Foreign", "Nairobi", "Moscow", "Lagos"])
-        else:
+        elif fraud_style == "sophisticated":
+            amt = cust["avg_amount"] * np.random.uniform(1.5, 3.5)
+            hour = max(0, min(23, int(np.random.normal(cust["typical_hour"], 4))))
+            if random.random() < 0.55:
+                hour = random.choice([1, 2, 3, 4, 5, 23])
+            cat = random.choice(cust["preferred_categories"])
+            device = f"DEV-{random.randint(10000, 99999)}" if random.random() < 0.5 else random.choice(cust["preferred_devices"])
+            city = random.choice(["Unknown", "Mumbai", "Delhi", "Bangalore"])
+        else:  # mule
             amt = max(10, np.random.normal(cust["avg_amount"], cust["std_amount"]))
             hour = max(0, min(23, int(np.random.normal(cust["typical_hour"], 3))))
             cat = random.choice(cust["preferred_categories"])
@@ -58,7 +106,7 @@ def generate_synthetic_data(n_customers=200, n_transactions=5000, fraud_rate=0.0
         )
 
         payment_methods = ["upi", "credit_card", "debit_card", "netbanking", "wallet"]
-        if is_fraud:
+        if is_fraud and fraud_style == "opportunistic":
             pay_method = random.choice(["credit_card", "debit_card", "wallet"])
         else:
             pay_method = random.choice(payment_methods)

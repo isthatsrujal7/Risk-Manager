@@ -202,11 +202,31 @@ export default function TransactionDetail() {
             </button>
           </div>
 
+          {ra && ra.cost_decision && (
+            <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-800 mb-1">Cost Decision</h3>
+              <p className="text-xs text-gray-500 mb-3">Expected-loss economics for this transaction</p>
+              <div className={`p-3 rounded-lg border mb-3 ${ra.cost_decision.decision === 'ALLOW' ? 'bg-green-50 border-green-200' : ra.cost_decision.decision === 'BLOCK' ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+                <p className="text-xs font-medium uppercase text-gray-500 mb-0.5">Decision</p>
+                <p className={`font-bold ${ra.cost_decision.decision === 'ALLOW' ? 'text-green-700' : ra.cost_decision.decision === 'BLOCK' ? 'text-red-700' : 'text-amber-700'}`}>
+                  {ra.cost_decision.decision}
+                </p>
+              </div>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-gray-500">Expected saving</span><span className="font-semibold text-green-700">₹{ra.cost_decision.expected_saving.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Loss if allowed</span><span className="font-medium">₹{ra.cost_decision.expected_loss_allow.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Loss if flagged</span><span className="font-medium">₹{ra.cost_decision.expected_loss_flag.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Break-even fraud prob</span><span className="font-medium">{(ra.cost_decision.break_even_prob * 100).toFixed(2)}%</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Review friction</span><span className="font-medium">₹{ra.cost_decision.handling_friction}</span></div>
+              </div>
+            </div>
+          )}
+
           {ra && (
             <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
               <h3 className="text-lg font-semibold text-gray-800 mb-4">Feature Contributions</h3>
               <div className="space-y-2">
-                {Object.entries(ra.feature_contributions || {}).map(([key, val]) => (
+                {Object.entries(ra.feature_contributions || {}).filter(([key]) => key !== 'cost_decision').map(([key, val]) => (
                   <div key={key} className="flex items-center gap-2">
                     <span className="text-sm text-gray-600 w-24">{key}</span>
                     <div className="flex-1 bg-gray-200 rounded-full h-2">

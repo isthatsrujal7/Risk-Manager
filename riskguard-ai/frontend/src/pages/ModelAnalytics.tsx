@@ -27,6 +27,9 @@ export default function ModelAnalytics() {
     { name: 'True Pos', value: modelPerf.confusion_matrix[1][1] },
   ] : [];
 
+  const he = modelPerf?.honest_evaluation;
+  const co = he?.cost_optimal;
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">Model Analytics</h1>
@@ -37,6 +40,24 @@ export default function ModelAnalytics() {
         <MetricCard title="F1 Score" value={`${((overview?.f1_score || 0) * 100).toFixed(1)}%`} />
         <MetricCard title="FPR" value={`${((overview?.false_positive_rate || 0) * 100).toFixed(2)}%`} />
         <MetricCard title="FNR" value={`${((overview?.false_negative_rate || 0) * 100).toFixed(2)}%`} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+          <p className="text-xs text-gray-500 font-medium">Estimated Prevention Saved</p>
+          <p className="text-xl font-bold text-green-700 mt-1">₹{(overview?.cost_saved_total || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+          <p className="text-xs text-gray-400 mt-1">Expected-loss model over {overview?.cost_decisions_computed || 0} scored txns</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+          <p className="text-xs text-gray-500 font-medium">Exposure if All Allowed</p>
+          <p className="text-xl font-bold text-red-700 mt-1">₹{(overview?.cost_exposure_if_all_allowed || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+          <p className="text-xs text-gray-400 mt-1">What fraud would cost with no screening</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm p-4 border border-gray-100">
+          <p className="text-xs text-gray-500 font-medium">Review friction / incident</p>
+          <p className="text-xl font-bold text-gray-900 mt-1">₹{overview?.cost_assumptions?.friction_per_review || 0}</p>
+          <p className="text-xs text-gray-400 mt-1">Per human-review cost used by the cost engine</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -94,6 +115,60 @@ export default function ModelAnalytics() {
           )}
         </div>
       </div>
+
+      {he && (
+        <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="text-lg font-semibold text-gray-800">Honest Evaluation</h3>
+            <span className={`px-3 py-1 rounded-full text-xs font-bold text-white ${he.leakage_audit?.status === 'PASS' ? 'bg-green-500' : 'bg-red-500'}`}>
+              Leakage audit: {he.leakage_audit?.status}
+            </span>
+          </div>
+          <p className="text-sm text-gray-500 mb-4">Self-critical test-set report: chronological split, no train/test ID overlap, bootstrap 95% CIs, and an operating point chosen by cost (₹50 FP vs ₹500 FN), not by a fixed 0.5 threshold.</p>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <p className="text-xs text-gray-500">Split method</p>
+              <p className="text-sm font-medium text-gray-800 mt-0.5">{he.split?.method ? he.split.method.split('(')[0].trim() : '-'}</p>
+            </div>
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <p className="text-xs text-gray-500">Train overlapping test</p>
+              <p className="text-sm font-medium text-gray-800 mt-0.5">{he.leakage_audit?.overlap_count} IDs</p>
+            </div>
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <p className="text-xs text-gray-500">Test samples</p>
+              <p className="text-sm font-medium text-gray-800 mt-0.5">{he.threshold_0_5?.total_samples}</p>
+            </div>
+            <div className="p-3 bg-gray-50 rounded-lg">
+              <p className="text-xs text-gray-500">Cost-optimal threshold</p>
+              <p className="text-sm font-bold text-brand-600 mt-0.5">{co?.threshold}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 rounded-lg border border-gray-200">
+              <h4 className="text-sm font-semibold text-gray-700 mb-3">Fixed threshold (0.5)</h4>
+              <InfoRow label="Precision" value={`${((he.threshold_0_5?.precision || 0) * 100).toFixed(1)}%`} />
+              <InfoRow label="Recall" value={`${((he.threshold_0_5?.recall || 0) * 100).toFixed(1)}%`} />
+              <InfoRow label="F1" value={`${((he.threshold_0_5?.f1 || 0) * 100).toFixed(1)}%`} />
+              <InfoRow label="False positives" value={he.threshold_0_5?.fp_count} />
+              <InfoRow label="False negatives" value={he.threshold_0_5?.fn_count} />
+            </div>
+            <div className="p-4 rounded-lg border border-brand-200 bg-brand-50/40">
+              <h4 className="text-sm font-semibold text-brand-700 mb-3">Cost-optimal operating point</h4>
+              <InfoRow label="Precision" value={`${((co?.precision || 0) * 100).toFixed(1)}% (95% CI ${((co?.precision_ci?.ci_95_low || 0) * 100).toFixed(1)}–${((co?.precision_ci?.ci_95_high || 0) * 100).toFixed(1)}%)`} />
+              <InfoRow label="Recall" value={`${((co?.recall || 0) * 100).toFixed(1)}% (95% CI ${((co?.recall_ci?.ci_95_low || 0) * 100).toFixed(1)}–${((co?.recall_ci?.ci_95_high || 0) * 100).toFixed(1)}%)`} />
+              <InfoRow label="F1" value={`${((co?.f1 || 0) * 100).toFixed(1)}% (95% CI ${((co?.f1_ci?.ci_95_low || 0) * 100).toFixed(1)}–${((co?.f1_ci?.ci_95_high || 0) * 100).toFixed(1)}%)`} />
+              <InfoRow label="False positives" value={co?.fp_count} />
+              <InfoRow label="False negatives" value={co?.fn_count} />
+              <hr className="my-2" />
+              <InfoRow label="Decision cost" value={`₹${(he.threshold_0_5?.total_cost || 0).toLocaleString()} → ₹${(co?.total_cost || 0).toLocaleString()}`} highlight />
+            </div>
+          </div>
+
+          <p className="text-xs text-gray-400 mt-4">{he.headline}</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl shadow-sm p-6 border border-gray-100">

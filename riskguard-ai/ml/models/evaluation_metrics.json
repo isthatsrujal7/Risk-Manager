@@ -1,101 +1,101 @@
 {
-  "precision": 0.973,
-  "recall": 0.973,
-  "f1": 0.973,
+  "precision": 1.0,
+  "recall": 0.7451,
+  "f1": 0.8539,
   "confusion_matrix": [
     [
-      600,
-      1
+      949,
+      0
     ],
     [
-      1,
-      36
+      13,
+      38
     ]
   ],
-  "false_positive_rate": 0.0017,
-  "false_negative_rate": 0.027,
-  "pr_auc": 0.9954,
-  "true_positives": 36,
-  "true_negatives": 600,
-  "false_positives": 1,
-  "false_negatives": 1,
-  "total_samples": 638,
-  "model_type": "Gradient Boosting",
-  "model_version": "v1.0-gradient_boosting",
-  "best_model": "gradient_boosting",
+  "false_positive_rate": 0.0,
+  "false_negative_rate": 0.2549,
+  "pr_auc": 0.8706,
+  "true_positives": 38,
+  "true_negatives": 949,
+  "false_positives": 0,
+  "false_negatives": 13,
+  "total_samples": 1000,
+  "model_type": "Random Forest",
+  "model_version": "v1.0-random_forest",
+  "best_model": "random_forest",
   "all_model_results": {
     "logistic_regression": {
-      "precision": 0.7391,
-      "recall": 0.9189,
-      "f1": 0.8193,
+      "precision": 0.6324,
+      "recall": 0.8431,
+      "f1": 0.7227,
       "confusion_matrix": [
         [
-          589,
-          12
+          924,
+          25
         ],
         [
-          3,
-          34
+          8,
+          43
         ]
       ],
-      "false_positive_rate": 0.02,
-      "false_negative_rate": 0.0811,
-      "pr_auc": 0.9637,
-      "true_positives": 34,
-      "true_negatives": 589,
-      "false_positives": 12,
-      "false_negatives": 3,
-      "total_samples": 638,
+      "false_positive_rate": 0.0263,
+      "false_negative_rate": 0.1569,
+      "pr_auc": 0.8735,
+      "true_positives": 43,
+      "true_negatives": 924,
+      "false_positives": 25,
+      "false_negatives": 8,
+      "total_samples": 1000,
       "model_type": "Logistic Regression",
       "model_version": "v1.0-logistic_regression"
     },
     "random_forest": {
-      "precision": 0.9706,
-      "recall": 0.8919,
-      "f1": 0.9296,
+      "precision": 1.0,
+      "recall": 0.7451,
+      "f1": 0.8539,
       "confusion_matrix": [
         [
-          600,
-          1
+          949,
+          0
         ],
         [
-          4,
-          33
+          13,
+          38
         ]
       ],
-      "false_positive_rate": 0.0017,
-      "false_negative_rate": 0.1081,
-      "pr_auc": 0.9922,
-      "true_positives": 33,
-      "true_negatives": 600,
-      "false_positives": 1,
-      "false_negatives": 4,
-      "total_samples": 638,
+      "false_positive_rate": 0.0,
+      "false_negative_rate": 0.2549,
+      "pr_auc": 0.8706,
+      "true_positives": 38,
+      "true_negatives": 949,
+      "false_positives": 0,
+      "false_negatives": 13,
+      "total_samples": 1000,
       "model_type": "Random Forest",
       "model_version": "v1.0-random_forest"
     },
     "gradient_boosting": {
-      "precision": 0.973,
-      "recall": 0.973,
-      "f1": 0.973,
+      "precision": 0.9302,
+      "recall": 0.7843,
+      "f1": 0.8511,
       "confusion_matrix": [
         [
-          600,
-          1
+          946,
+          3
         ],
         [
-          1,
-          36
+          11,
+          40
         ]
       ],
-      "false_positive_rate": 0.0017,
-      "false_negative_rate": 0.027,
-      "pr_auc": 0.9954,
-      "true_positives": 36,
-      "true_negatives": 600,
-      "false_positives": 1,
-      "false_negatives": 1,
-      "total_samples": 638,
+      "false_positive_rate": 0.0032,
+      "false_negative_rate": 0.2157,
+      "pr_auc": 0.8679,
+      "true_positives": 40,
+      "true_negatives": 946,
+      "false_positives": 3,
+      "false_negatives": 11,
+      "total_samples": 1000,
       "model_type": "Gradient Boosting",
       "model_version": "v1.0-gradient_boosting"
     }

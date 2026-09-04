@@ -1,0 +1,71 @@
+{
+  "model_version": "v1.0-random_forest",
+  "leakage_audit": {
+    "train_size": 3500,
+    "test_size": 1000,
+    "overlap_count": 0,
+    "status": "PASS",
+    "overlap_ids": []
+  },
+  "split": {
+    "method": "chronological (train = first 70% by timestamp, then 10% val, last 20% test)",
+    "note": "no random shuffle - this split is the honest one; shuffling could leak future behavior into the past."
+  },
+  "threshold_0_5": {
+    "threshold": 0.5,
+    "confusion_matrix": {
+      "tp": 38,
+      "tn": 949,
+      "fp": 0,
+      "fn": 13
+    },
+    "precision": 1.0,
+    "recall": 0.7451,
+    "f1": 0.8539,
+    "fp_count": 0,
+    "fn_count": 13,
+    "total_samples": 1000,
+    "total_fp_cost": 0.0,
+    "total_fn_cost": 6500.0,
+    "total_cost": 6500.0
+  },
+  "cost_optimal": {
+    "threshold": 0.14,
+    "confusion_matrix": {
+      "tp": 43,
+      "tn": 923,
+      "fp": 26,
+      "fn": 8
+    },
+    "precision": 0.6232,
+    "recall": 0.8431,
+    "f1": 0.7167,
+    "fp_count": 26,
+    "fn_count": 8,
+    "total_samples": 1000,
+    "total_fp_cost": 1300.0,
+    "total_fn_cost": 4000.0,
+    "total_cost": 5300.0,
+    "precision_ci": {
+      "point": 0.6226,
+      "ci_95_low": 0.5,
+      "ci_95_high": 0.7344
+    },
+    "recall_ci": {
+      "point": 0.8417,
+      "ci_95_low": 0.7358,
+      "ci_95_high": 0.9303
+    },
+    "f1_ci": {
+      "point": 0.7142,
+      "ci_95_low": 0.6115,
+      "ci_95_high": 0.8
+    }
+  },
+  "decision_cost": {
+    "fp_cost_per_incident": 50.0,
+    "fn_cost_per_incident": 500.0,
+    "why": "FN cost (\u20b9500) is set 10x FP cost (\u20b950): a missed chargeback is 10x more expensive than one extra manual review. The runtime cost engine uses the same constants."
+  },
+  "headline": "Fixed-threshold 0.5: P 100.0%, R 74.5%, F1 85.4% | Cost-optimal threshold 0.14: P 62.3% (95% CI 50.0%-73.4%), R 84.3% (CI 73.6%-93.0%) | Total decision cost reduced to \u20b95,300 vs \u20b96,500 at fixed 0.5."
+}

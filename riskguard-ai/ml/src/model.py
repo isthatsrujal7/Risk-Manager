@@ -219,12 +219,21 @@ def train_and_evaluate(data_dict, feature_columns):
 
     shap_contributions = best_model.get_shap_values(X_test, cols)
 
+    # Honest, self-critical metrics: leakage audit + bootstrap CIs + cost.
+    honest = {}
+    try:
+        from ml.src.evaluate_honest import run_honest_evaluation
+        honest = run_honest_evaluation(data_dict, pipeline, best_model)
+    except Exception as e:
+        print(f"Honest evaluation skipped: {e}")
+
     return {
         "models": results,
         "best_model": best_model_name,
         "pipeline": pipeline,
         "feature_columns": cols,
         "shap_contributions": shap_contributions,
+        "honest_metrics": honest,
         "X_test": X_test,
         "y_test": y_test,
     }
